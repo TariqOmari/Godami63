@@ -1,0 +1,90 @@
+.sales-page {
+  color: #ea580c;
+}
+
+.sales-page [class*="text-"],
+.sales-page [class*="placeholder-"],
+.sales-page [style*="color:"] {
+  color: #ea580c !important;
+}
+
+.sales-page .text-white,
+.sales-page [class*="text-white"] {
+  color: #fff !important;
+}
+
+.sales-page [class*="bg-"] {
+  background-color: #fff !important;
+  background-image: none !important;
+}
+
+.sales-page [class*="bg-"][class*="-500"],
+.sales-page [class*="bg-"][class*="-600"],
+.sales-page [class*="bg-"][class*="-700"],
+.sales-page [class*="bg-"][class*="-800"],
+.sales-page [class*="bg-"][class*="-900"],
+.sales-page [class*="from-"][class*="-500"],
+.sales-page [class*="from-"][class*="-600"],
+.sales-page [class*="from-"][class*="-700"] {
+  background-color: #ea580c !important;
+}
+
+.sales-page [class*="bg-white/20"],
+.sales-page [class*="bg-white/30"] {
+  background-color: rgb(255 255 255 / 20%) !important;
+}
+
+.sales-page [class*="hover:bg-white/30"]:hover {
+  background-color: rgb(255 255 255 / 30%) !important;
+}
+
+.sales-page [class*="border-"] {
+  border-color: #ea580c !important;
+}
+
+.sales-page [class*="ring-"] {
+  --tw-ring-color: rgb(234 88 12 / 20%) !important;
+}
+
+.sales-page [class*="shadow-"] {
+  box-shadow: none !important;
+}
+
+.sales-page input,
+.sales-page select,
+.sales-page textarea {
+  color: #ea580c !important;
+  background-color: #fff !important;
+  border-color: #ea580c !important;
+  --tw-ring-color: rgb(234 88 12 / 20%) !important;
+}
+
+.sales-page input::placeholder,
+.sales-page textarea::placeholder {
+  color: #ea580c !important;
+  opacity: 0.7;
+}
+
+.sales-page table thead tr {
+  color: #ea580c !important;
+  background-color: #fff !important;
+  background-image: none !important;
+  border-color: #ea580c !important;
+}
+
+.sales-page table tbody tr:hover {
+  background-color: #fff !important;
+}
+
+.sales-page [class*="fixed"][class*="inset-0"] {
+  background-color: rgb(234 88 12 / 35%) !important;
+}
+
+.sales-page [style*="background"] {
+  background-color: #fff !important;
+}
+
+.sales-page table th[style*="background"] {
+  color: #fff !important;
+  background-color: #ea580c !important;
+}

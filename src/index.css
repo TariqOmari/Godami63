@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --brand-orange: #ea580c;
+    --brand-amber: #f59e0b;
+  }
+
+  input:focus,
+  select:focus,
+  textarea:focus {
+    --tw-ring-color: rgb(249 115 22 / 0.16) !important;
+    border-color: var(--brand-orange) !important;
+  }
+
+  [class*="focus-within:border-"]:focus-within {
+    border-color: rgb(253 186 116) !important;
+  }
+
+  [class*="focus-within:ring-"]:focus-within {
+    --tw-ring-color: rgb(249 115 22 / 0.1) !important;
+  }
+
+  table thead tr {
+    background-image: linear-gradient(to left, rgb(255 247 237 / 0.95), rgb(255 251 235 / 0.85)) !important;
+    border-bottom-color: rgb(254 215 170) !important;
+  }
+
+  table tbody tr:hover {
+    background-color: rgb(255 247 237 / 0.55) !important;
+  }
+}
+
+@layer utilities {
+  button[class*="bg-blue-600"],
+  button[class*="bg-cyan-600"],
+  button[class*="bg-indigo-600"],
+  button[class*="bg-purple-600"],
+  button[class*="bg-emerald-600"],
+  button[class*="bg-teal-600"] {
+    background-color: transparent !important;
+    background-image: linear-gradient(to right, var(--brand-orange), var(--brand-amber)) !important;
+  }
+
+  [class*="bg-gradient-to-"][class*="from-blue-"],
+  [class*="bg-gradient-to-"][class*="from-cyan-"],
+  [class*="bg-gradient-to-"][class*="from-indigo-"],
+  [class*="bg-gradient-to-"][class*="from-purple-"],
+  [class*="bg-gradient-to-"][class*="from-pink-"],
+  [class*="bg-gradient-to-"][class*="from-emerald-"],
+  [class*="bg-gradient-to-"][class*="from-teal-"] {
+    --tw-gradient-from: var(--brand-orange) !important;
+    --tw-gradient-to: var(--brand-amber) !important;
+    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+  }
+}
