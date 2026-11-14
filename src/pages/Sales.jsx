@@ -6,7 +6,8 @@ import {
   Clock, RefreshCw, Receipt, Info, Trash2, Eye,
   TrendingUp, Percent, Calendar, ChevronRight, ChevronLeft,
   Printer, Download, Phone, Mail, MapPin, UserPlus,
-  ScanLine, ArrowDownRight, Wallet, FileText, ChevronDown, ChevronUp
+  ScanLine, ArrowDownRight, Wallet, FileText, ChevronDown, ChevronUp,
+  RotateCcw, ArrowLeftRight, TrendingDown, ArrowLeft,
 } from 'lucide-react';
 import axios from 'axios';
 import DashboardLayout from '../components/DashboardLayout';
@@ -289,7 +290,7 @@ function PersianDatePicker({ value, onChange, placeholder = '1405-05-05' }) {
 }
 
 export default function Sales() {
-  const [activeTab, setActiveTab] = useState('list'); // 'list' | 'fastsell'
+  const [activeTab, setActiveTab] = useState('list');
 
   const [sales, setSales] = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -307,15 +308,10 @@ export default function Sales() {
   const [invoiceSale, setInvoiceSale] = useState(null);
   const [loadingInvoiceId, setLoadingInvoiceId] = useState(null);
 
-  // 🚀 NEW: Calculate Today's Revenue
+  const [returnSale, setReturnSale] = useState(null);
+  const [returnDetailsSale, setReturnDetailsSale] = useState(null);
+
   const todayPersian = getTodayPersian();
-  const todayRevenue = useMemo(() => sales.reduce((acc, s) => {
-    if (s.sale_date === todayPersian) {
-      acc.afn += Number(s.paid_amount_afn) || 0;
-      acc.usd += Number(s.paid_amount_usd) || 0;
-    }
-    return acc;
-  }, { afn: 0, usd: 0 }), [sales, todayPersian]);
 
   const fetchSales = async (search = '', payment = '') => {
     setLoading(true);
@@ -366,7 +362,6 @@ export default function Sales() {
     }
   };
 
-  // ✅ FIX: Handle Invoice Fetching Safely (No backend modification needed)
   const handleViewInvoice = async (sale) => {
     setLoadingInvoiceId(sale.id);
     try {
@@ -375,7 +370,6 @@ export default function Sales() {
         const { data } = await api.get(`/sales/${sale.id}/invoice`);
         salesData = data.sales || [sale];
       } catch (err) {
-        // If invoice endpoint is broken (404/500), fallback to fetching the invoice by sale_ids or individual sale
         if (sale.sale_ids && Array.isArray(sale.sale_ids) && sale.sale_ids.length > 0) {
           const results = await Promise.all(
             sale.sale_ids.map(id => api.get(`/sales/${id}`).then(r => r.data).catch(() => null))
@@ -383,13 +377,7 @@ export default function Sales() {
           salesData = results.filter(Boolean);
         }
       }
-      
-      const invoiceObj = {
-        ...sale,
-        sales: salesData,
-      };
-      
-      setInvoiceSale(invoiceObj);
+      setInvoiceSale({ ...sale, sales: salesData });
     } catch (e) {
       console.error(e);
       setToast({ show: true, message: 'خطا در بارگذاری فاکتور', type: 'warning' });
@@ -410,6 +398,50 @@ export default function Sales() {
     return acc;
   }, { totalAfn: 0, totalUsd: 0, paidAfn: 0, paidUsd: 0, remAfn: 0, remUsd: 0, profit: 0, count: 0 }), [sales]);
 
+  /* ============ KPI — سود واقعی (اول سرمایه، بعد سود) ============ */
+  const kpi = useMemo(() => {
+    let todayCashAfn = 0, todayCashUsd = 0;
+    let totalCashAfn = 0, totalCashUsd = 0;
+    let profitCashAfn = 0;
+
+    for (const s of sales) {
+      const paidAfn      = Number(s.paid_amount_afn) || 0;
+      const paidUsd      = Number(s.paid_amount_usd) || 0;
+      const remainingAfn = Number(s.remaining_amount_afn) || 0;
+      const remainingUsd = Number(s.remaining_amount_usd) || 0;
+      const totalAfn     = Number(s.total_price_afn) || 0;
+      const totalUsd     = Number(s.total_price_usd) || 0;
+      const profitTotal  = Number(s.profit) || 0;
+      const costPrice    = Number(s.cost_price) || 0; // قیمت خرید (سرمایه)
+
+      // پول نقد = کل فروش منهای قرض
+      const saleCashAfn = Math.max(0, totalAfn - remainingAfn);
+      const saleCashUsd = Math.max(0, totalUsd - remainingUsd);
+
+      totalCashAfn += saleCashAfn;
+      totalCashUsd += saleCashUsd;
+
+      // محاسبه سود واقعی این فاکتور
+      // اگر پول نقد بیشتر از سرمایه بود، اختلافش سود است
+      let saleProfitCash = 0;
+      if (saleCashAfn > costPrice) {
+        saleProfitCash = saleCashAfn - costPrice;
+        // اما سود بیشتر از کل سود این محصول نمی‌شود
+        saleProfitCash = Math.min(saleProfitCash, profitTotal);
+      }
+
+      profitCashAfn += saleProfitCash;
+
+      // فقط امروز
+      if (s.sale_date === todayPersian) {
+        todayCashAfn += paidAfn;
+        todayCashUsd += paidUsd;
+      }
+    }
+
+    return { todayCashAfn, todayCashUsd, totalCashAfn, totalCashUsd, profitCashAfn };
+  }, [sales, todayPersian]);
+
   return (
     <DashboardLayout>
       <div className="space-y-6" dir="rtl">
@@ -422,7 +454,7 @@ export default function Sales() {
           />
         )}
 
-        {/* ========== HEADER ========== */}
+        {/* HEADER */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-black flex items-center gap-3">
@@ -446,7 +478,7 @@ export default function Sales() {
           )}
         </div>
 
-        {/* ========== TAB SWITCHER ========== */}
+        {/* TAB SWITCHER */}
         <div className="bg-white p-1.5 rounded-2xl shadow-sm border border-gray-300 inline-flex gap-1">
           <button
             onClick={() => setActiveTab('list')}
@@ -472,21 +504,41 @@ export default function Sales() {
           </button>
         </div>
 
-        {/* ========== LIST TAB ========== */}
+        {/* LIST TAB */}
         {activeTab === 'list' && (
           <>
-            {/* 🚀 UPDATED GRID TO INCLUDE TODAY'S REVENUE */}
+            {/* KPI CARDS — بدون بج، همه تمیز و فقط پول نقد */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <KpiCard 
-                icon={<Wallet size={18} />} 
-                label="دخل امروز (نقد امروز)" 
-                valueAfn={todayRevenue.afn} 
-                valueUsd={todayRevenue.usd} 
-                color="black" 
+              <KpiCard
+                icon={<Wallet size={18} />}
+                label="دخل امروز"
+                valueAfn={kpi.todayCashAfn}
+                valueUsd={kpi.todayCashUsd}
+                color="black"
               />
-              <KpiCard icon={<DollarSign size={18} />} label="مجموع فروش یا دخل" valueAfn={totals.totalAfn} valueUsd={totals.totalUsd} color="black" />
-              <KpiCard icon={<HandCoins size={18} />} label="باقی‌مانده (بدهی مشتریان)" valueAfn={totals.remAfn} valueUsd={totals.remUsd} color="black" />
-              <KpiCard icon={<TrendingUp size={18} />} label="سود کل" valueAfn={totals.profit} color="black" />
+
+              <KpiCard
+                icon={<DollarSign size={18} />}
+                label="مجموع فروش یا دخل"
+                valueAfn={kpi.totalCashAfn}
+                valueUsd={kpi.totalCashUsd}
+                color="black"
+              />
+
+              <KpiCard
+                icon={<HandCoins size={18} />}
+                label="باقی‌مانده (بدهی مشتریان)"
+                valueAfn={totals.remAfn}
+                valueUsd={totals.remUsd}
+                color="black"
+              />
+
+              <KpiCard
+                icon={<TrendingUp size={18} />}
+                label="سود کل"
+                valueAfn={kpi.profitCashAfn}
+                color="black"
+              />
             </div>
 
             <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-300 flex flex-col sm:flex-row gap-3">
@@ -555,16 +607,23 @@ export default function Sales() {
                         <th className="text-right px-4 py-4 text-xs font-bold text-black">وضعیت</th>
                         <th className="text-right px-4 py-4 text-xs font-bold text-black">پرداخت‌شده</th>
                         <th className="text-right px-4 py-4 text-xs font-bold text-black">باقی‌مانده</th>
+                        <th className="text-right px-4 py-4 text-xs font-bold text-black">تاریخ برگشت قرض</th>
                         <th className="text-right px-4 py-4 text-xs font-bold text-black">سود</th>
-                        <th className="text-center px-4 py-4 text-xs font-bold text-black w-28">عملیات</th>
+                        <th className="text-center px-4 py-4 text-xs font-bold text-black w-40">عملیات</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
                       {sales.map((s, i) => {
                         const meta = PAYMENT_META[s.payment_type] || PAYMENT_META.cash;
                         const PayIcon = meta.icon;
+                        const hasReturns = s.returned || (s.returns && s.returns.length > 0);
                         return (
-                          <tr key={s.id} className="hover:bg-gray-50 transition-colors">
+                          <tr
+                            key={s.id}
+                            className={`transition-colors ${
+                              hasReturns ? 'bg-orange-50/30 hover:bg-orange-50/60' : 'hover:bg-gray-50'
+                            }`}
+                          >
                             <td className="px-4 py-4">
                               <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 text-black text-xs font-bold border border-gray-300">
                                 {i + 1}
@@ -593,11 +652,30 @@ export default function Sales() {
                                 </span>
                               </div>
                             </td>
+
                             <td className="px-4 py-4">
                               <p className="text-sm font-bold text-black truncate max-w-[160px]">
                                 {s.product_name}
                               </p>
+                              {hasReturns && (
+                                <div className="mt-1.5 flex flex-col gap-1">
+                                  <button
+                                    onClick={() => setReturnDetailsSale(s)}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-300 hover:bg-rose-100 transition-colors w-fit"
+                                  >
+                                    <RotateCcw size={10} /> برگشت خورده
+                                  </button>
+                                  <span className="text-[10px] text-gray-600 font-bold leading-tight">
+                                    {Number(s.returned_modules) > 0 && `📦 ${s.returned_modules} ${s.module_name || 'کارتن'}`}
+                                    {Number(s.returned_modules) > 0 && (Number(s.returned_sub_modules) > 0 || Number(s.returned_sub_sub_modules) > 0) ? ' + ' : ''}
+                                    {Number(s.returned_sub_modules) > 0 && `🥤 ${s.returned_sub_modules} ${s.sub_module_name || 'دونە'}`}
+                                    {Number(s.returned_sub_modules) > 0 && Number(s.returned_sub_sub_modules) > 0 ? ' + ' : ''}
+                                    {Number(s.returned_sub_sub_modules) > 0 && `🔹 ${s.returned_sub_sub_modules} ${s.sub_sub_module_name || 'دانه'}`}
+                                  </span>
+                                </div>
+                              )}
                             </td>
+
                             <td className="px-4 py-4">
                               <div className="text-sm font-bold text-black">
                                 {s.qty_sold} × {s.sale_unit_name}
@@ -611,11 +689,23 @@ export default function Sales() {
                                 $ {Number(s.total_price_usd).toLocaleString()}
                               </div>
                             </td>
+
                             <td className="px-4 py-4">
-                              <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold border ${meta.bg} ${meta.textColor} ${meta.border}`}>
-                                <PayIcon size={12} /> {meta.text}
-                              </span>
+                              <div className="flex flex-col gap-1 items-start">
+                                <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold border ${meta.bg} ${meta.textColor} ${meta.border}`}>
+                                  <PayIcon size={12} /> {meta.text}
+                                </span>
+                                {hasReturns && (
+                                  <button
+                                    onClick={() => setReturnDetailsSale(s)}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-orange-50 text-orange-700 border border-orange-300 hover:bg-orange-100 transition-colors"
+                                  >
+                                    <RotateCcw size={10} /> برگشت خورده
+                                  </button>
+                                )}
+                              </div>
                             </td>
+
                             <td className="px-4 py-4">
                               <div className="text-sm font-bold text-black">
                                 {Number(s.paid_amount_afn).toLocaleString()}
@@ -632,12 +722,34 @@ export default function Sales() {
                                 $ {Number(s.remaining_amount_usd).toLocaleString()}
                               </div>
                             </td>
+
+                            <td className="px-4 py-4 text-center whitespace-nowrap">
+                              {s.assigned_loan_return_date ? (
+                                <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold font-mono border ${
+                                  Number(s.remaining_amount) > 0
+                                    ? 'bg-amber-50 text-amber-700 border-amber-300'
+                                    : 'bg-gray-100 text-gray-500 border-gray-300'
+                                }`}>
+                                  <Calendar size={11} />
+                                  {s.assigned_loan_return_date}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-gray-400">—</span>
+                              )}
+                            </td>
+
                             <td className="px-4 py-4">
                               <div className={`text-sm font-bold flex items-center gap-1 ${Number(s.profit) >= 0 ? 'text-black' : 'text-rose-700'}`}>
                                 {Number(s.profit) >= 0 ? <TrendingUp size={12} /> : <TrendingUp size={12} className="rotate-180" />}
                                 {Number(s.profit).toLocaleString()}
                               </div>
+                              {hasReturns && Number(s.total_refunded_amount_afn) > 0 && (
+                                <div className="text-[10px] text-rose-600 font-bold mt-1">
+                                  برگشت: {Number(s.total_refunded_amount_afn).toLocaleString()} AFN
+                                </div>
+                              )}
                             </td>
+
                             <td className="px-4 py-4">
                               <div className="flex items-center justify-center gap-1">
                                 <button
@@ -648,6 +760,7 @@ export default function Sales() {
                                 >
                                   {loadingInvoiceId === s.id ? <Loader2 size={15} className="animate-spin" /> : <Eye size={15} />}
                                 </button>
+
                                 {Number(s.remaining_amount) > 0 && (
                                   <button
                                     onClick={() => setPaySale(s)}
@@ -657,10 +770,29 @@ export default function Sales() {
                                     <HandCoins size={15} />
                                   </button>
                                 )}
+
+                                {hasReturns && (
+                                  <button
+                                    onClick={() => setReturnDetailsSale(s)}
+                                    className="p-2 rounded-lg bg-white border-2 border-rose-400 text-rose-600 hover:bg-rose-50 transition-all"
+                                    title="جزئیات برگشت"
+                                  >
+                                    <Info size={15} />
+                                  </button>
+                                )}
+
+                                <button
+                                  onClick={() => setReturnSale(s)}
+                                  className="relative p-2 rounded-lg bg-white border-2 border-orange-500 text-orange-600 hover:bg-orange-500 hover:text-white transition-all group"
+                                  title="برگشت محصول (برگشت خورده)"
+                                >
+                                  <RotateCcw size={15} className="group-hover:-rotate-45 transition-transform" />
+                                </button>
+
                                 <button
                                   onClick={() => setDeleteConfirm(s.id)}
                                   className="p-2 rounded-lg bg-white border border-gray-300 text-rose-600 hover:bg-rose-50 transition-all"
-                                  title="حذف و برگشت به موجودی"
+                                  title="حذف کامل فروش"
                                 >
                                   <Trash2 size={15} />
                                 </button>
@@ -682,7 +814,7 @@ export default function Sales() {
           </>
         )}
 
-        {/* ========== FAST SELL TAB ========== */}
+        {/* FAST SELL TAB */}
         {activeTab === 'fastsell' && (
           <FastSellTab
             customers={customers}
@@ -700,7 +832,7 @@ export default function Sales() {
           />
         )}
 
-        {/* ========== MODALS (list tab) ========== */}
+        {/* MODALS */}
         {showForm && (
           <SaleFormModal
             customers={customers}
@@ -724,6 +856,34 @@ export default function Sales() {
               fetchSales(searchTerm, paymentFilter);
               setToast({ show: true, message: 'پرداخت قرض ثبت شد', type: 'success' });
             }}
+            onRequestReturn={(sale) => {
+              setPaySale(null);
+              setReturnSale(sale);
+            }}
+          />
+        )}
+
+        {returnSale && (
+          <QuickReturnModal
+            sale={returnSale}
+            onClose={() => setReturnSale(null)}
+            onReturned={(result) => {
+              setReturnSale(null);
+              fetchSales(searchTerm, paymentFilter);
+              fetchRefs();
+              setToast({
+                show: true,
+                message: `✅ ${result.qty_returned} ${result.return_unit_name} برگشت ثبت شد — سرمایه برگشت`,
+                type: 'success',
+              });
+            }}
+          />
+        )}
+
+        {returnDetailsSale && (
+          <ReturnDetailsModal
+            sale={returnDetailsSale}
+            onClose={() => setReturnDetailsSale(null)}
           />
         )}
 
@@ -769,10 +929,442 @@ export default function Sales() {
 }
 
 /* ============================================================
-   FAST SELL TAB — barcode-first quick sale
+   🚀 RETURN DETAILS MODAL
+   ============================================================ */
+function ReturnDetailsModal({ sale, onClose }) {
+  const returns = sale.returns || [];
+
+  const totalReturnedPieces = returns.reduce((sum, r) => sum + Number(r.pieces_returned || 0), 0);
+  const totalRefunded = returns.reduce((sum, r) => sum + Number(r.refund_amount_afn || 0), 0);
+  const totalCapital = returns.reduce((sum, r) => sum + Number(r.cost_price_afn || 0), 0);
+  const totalProfitLost = returns.reduce((sum, r) => sum + Number(r.profit_reversed || 0), 0);
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8 border border-gray-300 overflow-hidden">
+
+        <div className="bg-orange-500 p-5 flex items-center justify-between">
+          <div className="flex items-center gap-3 text-white">
+            <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+              <RotateCcw size={22} />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold">جزئیات برگشت محصول</h3>
+              <p className="text-xs text-orange-100 font-mono">{sale.invoice_number}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+
+          <div className="bg-gray-50 border border-gray-300 rounded-2xl p-4 space-y-2">
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-600">محصول:</span>
+              <b className="text-black">{sale.product_name}</b>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-600">مشتری:</span>
+              <b className="text-black">{sale.customer_name}</b>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-600">فروش اصلی:</span>
+              <b className="text-black">{sale.qty_sold} × {sale.sale_unit_name}</b>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-600">تاریخ فروش:</span>
+              <b className="text-black font-mono">{sale.sale_date || '—'}</b>
+            </div>
+            {sale.assigned_loan_return_date && (
+              <div className="flex justify-between text-xs">
+                <span className="text-gray-600">تاریخ برگشت قرض:</span>
+                <b className="text-amber-700 font-mono">{sale.assigned_loan_return_date}</b>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-rose-50 border border-rose-300 rounded-xl p-3">
+              <p className="text-[10px] text-rose-700 font-bold mb-1">کل برگشت</p>
+              <p className="text-sm font-black text-rose-800">{totalReturnedPieces} دانه</p>
+            </div>
+            <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-3">
+              <p className="text-[10px] text-emerald-700 font-bold mb-1">سرمایه بازگشتی</p>
+              <p className="text-sm font-black text-emerald-800">{totalCapital.toLocaleString()} AFN</p>
+            </div>
+            <div className="bg-gray-50 border border-gray-300 rounded-xl p-3">
+              <p className="text-[10px] text-gray-700 font-bold mb-1">مبلغ بازگشتی</p>
+              <p className="text-sm font-black text-black">{totalRefunded.toLocaleString()} AFN</p>
+            </div>
+            <div className="bg-orange-50 border border-orange-300 rounded-xl p-3">
+              <p className="text-[10px] text-orange-700 font-bold mb-1">سود برگشت‌خورده</p>
+              <p className="text-sm font-black text-orange-800">-{totalProfitLost.toLocaleString()} AFN</p>
+            </div>
+          </div>
+
+          <div>
+            <h4 className="font-bold text-black text-sm mb-3 flex items-center gap-2">
+              <Receipt size={16} /> تاریخچه برگشت‌ها ({returns.length})
+            </h4>
+            <div className="space-y-2">
+              {returns.map((r, idx) => (
+                <div key={r.id || idx} className="border border-gray-300 rounded-xl p-3 bg-white">
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <span className="text-xs font-bold text-black bg-gray-100 px-2 py-0.5 rounded border border-gray-200 font-mono">
+                        {r.return_number}
+                      </span>
+                      <span className="text-[10px] text-gray-600 mr-2">
+                        {r.return_date || '—'}
+                      </span>
+                    </div>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                      r.refund_type === 'cash' ? 'bg-emerald-100 text-emerald-700' :
+                      r.refund_type === 'reduce_debt' ? 'bg-orange-100 text-orange-700' :
+                      'bg-blue-100 text-blue-700'
+                    }`}>
+                      {r.refund_type === 'cash' ? 'نقدی' : r.refund_type === 'reduce_debt' ? 'کاهش قرض' : 'تبدیل'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[11px] mb-2">
+                    <div>
+                      <span className="text-gray-600">برگشت:</span>{' '}
+                      <b className="text-black">{r.qty_returned} × {r.return_unit_name}</b>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">مجموع دانه:</span>{' '}
+                      <b className="text-black">{r.pieces_returned} دانه</b>
+                    </div>
+                  </div>
+
+                  {r.note && (
+                    <p className="text-[10px] text-gray-600 mb-1">
+                      <b>یادداشت:</b> {r.note}
+                    </p>
+                  )}
+
+                  <div className="border-t border-gray-200 pt-2 mt-2 grid grid-cols-2 gap-2 text-[10px]">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">مبلغ برگشت:</span>
+                      <b className="text-black">{Number(r.refund_amount_afn).toLocaleString()}</b>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">سود برگشتی:</span>
+                      <b className="text-rose-700">-{Number(r.profit_reversed).toLocaleString()}</b>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-gray-300">
+            <button onClick={onClose}
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl transition-all">
+              بستن
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   QUICK RETURN MODAL
+   ============================================================ */
+function QuickReturnModal({ sale, onClose, onReturned }) {
+  const product = sale.product;
+
+  const availableUnits = useMemo(() => {
+    if (!product) return [];
+    const list = [];
+    if (product.module_name)         list.push({ v: 'module',         label: product.module_name });
+    if (product.sub_module_name)     list.push({ v: 'sub_module',     label: product.sub_module_name });
+    if (product.sub_sub_module_name) list.push({ v: 'sub_sub_module', label: product.sub_sub_module_name });
+    return list;
+  }, [product]);
+
+  const [returnUnit, setReturnUnit]   = useState(availableUnits[0]?.v || 'module');
+  const [qty, setQty]                 = useState(1);
+  const [refundType, setRefundType]   = useState('reduce_debt');
+  const [note, setNote]               = useState('');
+  const [returnDate, setReturnDate]   = useState(getTodayPersian());
+
+  const [preview, setPreview]               = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [submitting, setSubmitting]         = useState(false);
+  const [error, setError]                   = useState('');
+
+  useEffect(() => {
+    if (!returnUnit || !qty || Number(qty) < 1) { setPreview(null); return; }
+    const t = setTimeout(async () => {
+      setPreviewLoading(true);
+      setError('');
+      try {
+        const { data } = await api.post(`/sales/${sale.id}/return/preview`, {
+          return_unit: returnUnit,
+          qty_returned: Number(qty),
+        });
+        setPreview(data);
+      } catch (e) {
+        setPreview(null);
+        setError(e.response?.data?.message || 'خطا در پیش‌نمایش');
+      } finally {
+        setPreviewLoading(false);
+      }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [sale.id, returnUnit, qty]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!qty || Number(qty) < 1) { setError('تعداد باید بزرگ‌تر از صفر باشد'); return; }
+    if (!preview) { setError('پیش‌نمایش آماده نیست'); return; }
+
+    setSubmitting(true);
+    try {
+      const { data } = await api.post(`/sales/${sale.id}/return`, {
+        return_unit: returnUnit,
+        qty_returned: Number(qty),
+        refund_type: refundType,
+        return_date: returnDate,
+        note: note || null,
+      });
+      onReturned(data);
+    } catch (e) {
+      setError(e.response?.data?.message || 'خطا در ثبت برگشت');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl my-8 border border-gray-300 overflow-hidden">
+
+        <div className="bg-gradient-to-l from-orange-500 to-orange-600 p-5 flex items-center justify-between">
+          <div className="flex items-center gap-3 text-white">
+            <div className="w-11 h-11 rounded-xl bg-white/20 flex items-center justify-center backdrop-blur">
+              <RotateCcw size={24} />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold">برگشت محصول</h3>
+              <p className="text-xs text-orange-100 font-mono mt-0.5">{sale.invoice_number}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-lg bg-white/20 hover:bg-white/30 text-white transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[78vh] overflow-y-auto">
+
+          {error && (
+            <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl flex items-center gap-2 text-rose-700 text-sm font-bold">
+              <AlertCircle size={16} /> {error}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-gray-50 border border-gray-300 rounded-2xl p-4 space-y-2">
+              <p className="text-xs font-bold text-black mb-2 flex items-center gap-1">
+                <Receipt size={14} /> اطلاعات فروش اصلی
+              </p>
+              <div className="flex justify-between text-xs">
+                <span className="text-gray-600">محصول:</span>
+                <b className="text-black">{sale.product_name}</b>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-gray-600">مشتری:</span>
+                <b className="text-black">{sale.customer_name}</b>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-gray-600">فروش اصلی:</span>
+                <b className="text-black">{sale.qty_sold} × {sale.sale_unit_name}</b>
+              </div>
+              <div className="flex justify-between text-xs">
+                <span className="text-gray-600">قیمت واحد:</span>
+                <b className="text-black">{Number(sale.unit_price).toLocaleString()} {sale.currency}</b>
+              </div>
+              {Number(sale.remaining_amount) > 0 && (
+                <div className="flex justify-between text-xs bg-rose-50 rounded-lg p-2 mt-1 border border-rose-200">
+                  <span className="text-rose-700 font-bold">بدهی باقی‌مانده:</span>
+                  <b className="text-rose-800">
+                    {Number(sale.remaining_amount_afn).toLocaleString()} AFN
+                  </b>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-sm font-bold text-black block mb-2">واحد برگشت *</label>
+                <div className={`grid gap-2 ${availableUnits.length === 3 ? 'grid-cols-3' : availableUnits.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                  {availableUnits.map(u => {
+                    const active = returnUnit === u.v;
+                    return (
+                      <button type="button" key={u.v} onClick={() => setReturnUnit(u.v)}
+                        className={`py-2.5 px-2 rounded-xl border-2 font-bold text-xs transition-all ${
+                          active ? 'border-orange-500 bg-orange-500 text-white shadow-sm' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                        }`}>
+                        {u.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-bold text-black block mb-2">تعداد برگشتی *</label>
+                <input type="number" min="1" value={qty} onChange={(e) => setQty(e.target.value)}
+                  className="form-input text-center font-bold text-lg" dir="ltr" required />
+              </div>
+              <div>
+                <label className="text-sm font-bold text-black block mb-2">تاریخ برگشت (شمسی) *</label>
+                <PersianDatePicker value={returnDate} onChange={setReturnDate} />
+              </div>
+            </div>
+          </div>
+
+          {previewLoading && (
+            <div className="text-center py-3">
+              <Loader2 size={20} className="animate-spin inline-block text-orange-500" />
+              <span className="text-xs text-gray-600 mr-2">در حال محاسبه...</span>
+            </div>
+          )}
+
+          {preview && !previewLoading && (
+            <div className="space-y-3">
+              <div className="bg-white border border-gray-300 rounded-2xl p-4">
+                <p className="text-xs font-bold text-black mb-3 flex items-center gap-1">
+                  <Boxes size={14} /> تغییر موجودی
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                    <p className="text-[10px] text-gray-600 font-bold mb-2">فعلی</p>
+                    <div className="text-xs text-black font-bold space-y-1">
+                      <div>📦 {preview.current_stock.module} {product?.module_name}</div>
+                      {product?.sub_module_name && <div>🥤 {preview.current_stock.sub_module} {product.sub_module_name}</div>}
+                      {product?.sub_sub_module_name && <div>🔹 {preview.current_stock.sub_sub_module} {product.sub_sub_module_name}</div>}
+                    </div>
+                  </div>
+                  <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-3">
+                    <p className="text-[10px] text-emerald-700 font-bold mb-2">پس از برگشت</p>
+                    <div className="text-xs text-emerald-800 font-bold space-y-1">
+                      <div>📦 {preview.remaining_stock.module} {product?.module_name}</div>
+                      {product?.sub_module_name && <div>🥤 {preview.remaining_stock.sub_module} {product.sub_module_name}</div>}
+                      {product?.sub_sub_module_name && <div>🔹 {preview.remaining_stock.sub_sub_module} {product.sub_sub_module_name}</div>}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-2 text-center text-[10px] text-gray-600 font-bold">
+                  افزودن: {preview.return.cartons} {product?.module_name} + {preview.return.cans} {product?.sub_module_name || 'دونە'} ({preview.return.pieces} پیس)
+                </div>
+              </div>
+
+              <div className="bg-white border border-gray-300 rounded-2xl p-4 space-y-2">
+                <p className="text-xs font-bold text-black mb-1 flex items-center gap-1">
+                  <Wallet size={14} /> محاسبات مالی
+                </p>
+                <div className="flex justify-between text-sm border-b border-gray-200 pb-2">
+                  <span className="text-gray-600">مبلغ برگشتی به مشتری:</span>
+                  <b className="text-black text-lg">
+                    {Number(preview.money.refund_total).toLocaleString()} {sale.currency}
+                  </b>
+                </div>
+                <div className="flex justify-between text-sm border-b border-gray-200 pb-2">
+                  <span className="text-gray-600">سرمایه بازگشته به موجودی:</span>
+                  <b className="text-emerald-700">
+                    {Number(preview.money.capital_back).toLocaleString()} {sale.currency}
+                  </b>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">سود برگشت‌خورده:</span>
+                  <b className="text-rose-700">
+                    -{Number(preview.money.profit_lost).toLocaleString()} {sale.currency}
+                  </b>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {preview && !previewLoading && (
+            <div>
+              <label className="text-sm font-bold text-black block mb-2">نحوه برگشت پول</label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { v: 'cash',        label: 'نقدی',       icon: Wallet },
+                  { v: 'reduce_debt', label: 'کاهش قرض',   icon: HandCoins },
+                  { v: 'exchange',    label: 'تبدیل',      icon: ArrowLeftRight },
+                ].map(({ v, label, icon: Icon }) => {
+                  const active = refundType === v;
+                  return (
+                    <button type="button" key={v} onClick={() => setRefundType(v)}
+                      className={`flex flex-col items-center gap-1 py-3 rounded-xl border-2 font-bold transition-all text-sm ${
+                        active ? 'border-orange-500 bg-orange-500 text-white shadow-sm' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                      }`}>
+                      <Icon size={16} /> {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label className="text-sm font-bold text-black block mb-2">یادداشت (اختیاری)</label>
+            <textarea value={note} onChange={(e) => setNote(e.target.value)}
+              rows="2" placeholder="دلیل برگشت..."
+              className="form-input resize-none" />
+          </div>
+
+          <div className="flex gap-3 pt-3 border-t border-gray-300">
+            <button type="submit" disabled={submitting || !preview}
+              className="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 rounded-xl shadow-sm flex items-center justify-center gap-2 disabled:opacity-50">
+              {submitting ? (
+                <><Loader2 size={18} className="animate-spin" /> در حال ثبت...</>
+              ) : (
+                <><RotateCcw size={18} /> ثبت برگشت</>
+              )}
+            </button>
+            <button type="button" onClick={onClose}
+              className="px-6 py-3 rounded-xl bg-white border border-gray-300 hover:bg-gray-100 text-black font-bold transition-colors">
+              انصراف
+            </button>
+          </div>
+        </form>
+
+        <style>{`
+          .form-input {
+            width: 100%;
+            background: #ffffff;
+            border: 1px solid #d1d5db;
+            border-radius: 12px;
+            padding: 12px 16px;
+            font-size: 14px;
+            color: #000000;
+            outline: none;
+            transition: all 0.2s;
+          }
+          .form-input:focus {
+            border-color: #f97316;
+            box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.15);
+          }
+          .form-input::placeholder { color: #9ca3af; }
+        `}</style>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   FAST SELL TAB
    ============================================================ */
 function FastSellTab({ customers, onSaleComplete }) {
-  // ---------- silent product prefetch ----------
   const [productsReady, setProductsReady] = useState(false);
   const productsById = useRef(new Map());
   const productsByBarcode = useRef(new Map());
@@ -803,17 +1395,14 @@ function FastSellTab({ customers, onSaleComplete }) {
     } catch { /* ignore */ }
   };
 
-  // ---------- scanner ----------
   const [scanBuffer, setScanBuffer] = useState('');
   const [scanStatus, setScanStatus] = useState(null);
   const bufferRef = useRef('');
   const lastKeyTimeRef = useRef(0);
   const resetTimerRef = useRef(null);
 
-  // ---------- per-item modal ----------
   const [activeProduct, setActiveProduct] = useState(null);
 
-  // ---------- cart ----------
   const [cart, setCart] = useState([]);
   const [customerId, setCustomerId] = useState('');
   const [addingCustomer, setAddingCustomer] = useState(false);
@@ -822,6 +1411,7 @@ function FastSellTab({ customers, onSaleComplete }) {
 
   const [paymentType, setPaymentType] = useState('cash');
   const [paidAmount, setPaidAmount] = useState('');
+  const [assignedLoanReturnDate, setAssignedLoanReturnDate] = useState('');
   const [note, setNote] = useState('');
   const [saleDate] = useState(getTodayPersian());
 
@@ -829,9 +1419,8 @@ function FastSellTab({ customers, onSaleComplete }) {
   const [submitError, setSubmitError] = useState('');
   const [submitResult, setSubmitResult] = useState(null);
 
-  const [isCustomerCollapsed, setIsCustomerCollapsed] = useState(true); // 🚀 NEW UI STATE
+  const [isCustomerCollapsed, setIsCustomerCollapsed] = useState(true);
 
-  // ---------- scanner listener ----------
   useEffect(() => {
     const isTyping = () => {
       const el = document.activeElement;
@@ -890,7 +1479,6 @@ function FastSellTab({ customers, onSaleComplete }) {
     setActiveProduct(found);
   };
 
-  // ---------- add to cart ----------
   const handleAddToCart = (item) => {
     setCart(prev => [
       ...prev,
@@ -900,7 +1488,6 @@ function FastSellTab({ customers, onSaleComplete }) {
   };
   const removeItem = (key) => setCart(prev => prev.filter(i => i.key !== key));
 
-  // ---------- totals ----------
   const totals = useMemo(() => {
     let totalOriginal = 0, totalAfn = 0, totalUsd = 0;
     for (const it of cart) {
@@ -920,7 +1507,6 @@ function FastSellTab({ customers, onSaleComplete }) {
   }, [paymentType, paidAmount, totals.totalOriginal]);
   const remaining = Math.max(0, totals.totalOriginal - paid);
 
-  // ---------- submit ----------
   const handleSubmit = async () => {
     setSubmitError(''); setSubmitResult(null);
     if (cart.length === 0) { setSubmitError('سبد خالی است'); return; }
@@ -965,6 +1551,8 @@ function FastSellTab({ customers, onSaleComplete }) {
           exchange_rate: Number(it.exchange_rate),
           payment_type: paymentType,
           paid_amount: paymentType === 'loan_partial' ? Number(paidAmount) : undefined,
+          assigned_loan_return_date:
+            paymentType !== 'cash' && assignedLoanReturnDate ? assignedLoanReturnDate : null,
           note: note || null,
           sale_date: saleDate || null,
           deduct_from: it.deduct_from,
@@ -977,7 +1565,6 @@ function FastSellTab({ customers, onSaleComplete }) {
       }
     }
 
-    // Create the multi-invoice if any sales were created
     let invoiceData = null;
     if (createdSaleIds.length > 0) {
       let createdInvoice = null;
@@ -989,7 +1576,6 @@ function FastSellTab({ customers, onSaleComplete }) {
         });
         createdInvoice = data;
       } catch (err) {
-        // ✅ Catch the Duplicate Entry error from backend
         console.error('Backend failed to generate invoice (Duplicate?), gracefully handling', err?.response?.data);
         createdInvoice = {
           id: `temp-${Date.now()}`,
@@ -1003,15 +1589,10 @@ function FastSellTab({ customers, onSaleComplete }) {
       }
 
       if (createdInvoice) {
-        // Fetch individual sales to populate .sales array securely
         const fetchedSales = await Promise.all(
           createdSaleIds.map(id => api.get(`/sales/${id}`).then(r => r.data).catch(() => null))
         );
-        
-        invoiceData = { 
-          ...createdInvoice, 
-          sales: fetchedSales.filter(Boolean) 
-        };
+        invoiceData = { ...createdInvoice, sales: fetchedSales.filter(Boolean) };
       }
     }
 
@@ -1020,6 +1601,7 @@ function FastSellTab({ customers, onSaleComplete }) {
 
     if (failed.length === 0) {
       setCart([]);
+      setAssignedLoanReturnDate('');
       await refreshProductCache();
       onSaleComplete?.({ createdCount: created.length, failedCount: 0, invoice: invoiceData });
     } else if (created.length > 0) {
@@ -1030,7 +1612,6 @@ function FastSellTab({ customers, onSaleComplete }) {
 
   return (
     <div className="space-y-4">
-      {/* Scanner status */}
       {scanStatus && (
         <div className={`rounded-2xl p-4 shadow-sm border-2 flex items-center gap-3 transition-all ${
           scanStatus.type === 'success'
@@ -1042,7 +1623,6 @@ function FastSellTab({ customers, onSaleComplete }) {
         </div>
       )}
 
-      {/* Scanner banner */}
       <div className="bg-orange-500 p-5 rounded-2xl shadow-sm text-white">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3">
@@ -1065,7 +1645,6 @@ function FastSellTab({ customers, onSaleComplete }) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* CART — 2/3 */}
         <div className="lg:col-span-2 space-y-4">
           <div className="bg-white rounded-2xl shadow-sm border border-gray-300 overflow-hidden">
             <div className="p-4 border-b border-gray-300 flex items-center justify-between bg-gray-50">
@@ -1107,7 +1686,7 @@ function FastSellTab({ customers, onSaleComplete }) {
                         </span>
                       </p>
                       <p className="text-[10px] text-gray-500 mt-0.5 font-bold">
-                        واحد فروش: {it.sale_unit_label} 
+                        واحد فروش: {it.sale_unit_label}
                         {it.deduct_from && ` (کسر از ${it.deduct_from === 'cartons' ? 'کارتن' : 'بوتل'})`}
                       </p>
                     </div>
@@ -1123,13 +1702,10 @@ function FastSellTab({ customers, onSaleComplete }) {
             )}
           </div>
 
-          {/* Payment + customer */}
           {cart.length > 0 && (
             <div className="bg-white rounded-2xl shadow-sm border border-gray-300 p-5 space-y-4">
-              
-              {/* 🚀 NEW: COLLAPSIBLE CUSTOMER SECTION */}
               <div className="border border-gray-200 rounded-xl overflow-hidden">
-                <button 
+                <button
                   type="button"
                   onClick={() => setIsCustomerCollapsed(v => !v)}
                   className="w-full flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 transition-colors"
@@ -1206,7 +1782,6 @@ function FastSellTab({ customers, onSaleComplete }) {
                 )}
               </div>
 
-              {/* Payment type */}
               <div>
                 <label className="text-sm font-bold text-black block mb-2">وضعیت پرداخت</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -1247,6 +1822,17 @@ function FastSellTab({ customers, onSaleComplete }) {
                     />
                   </div>
                 )}
+
+                {paymentType !== 'cash' && (
+                  <div className="mt-3">
+                    <label className="text-sm font-bold text-black block mb-2">تاریخ برگشت قرض (اختیاری)</label>
+                    <PersianDatePicker
+                      value={assignedLoanReturnDate}
+                      onChange={setAssignedLoanReturnDate}
+                      placeholder="1405-05-05"
+                    />
+                  </div>
+                )}
               </div>
 
               <textarea
@@ -1260,7 +1846,6 @@ function FastSellTab({ customers, onSaleComplete }) {
           )}
         </div>
 
-        {/* SUMMARY — 1/3 */}
         <div className="space-y-4">
           <div className="bg-white border-2 border-orange-500 rounded-2xl p-5 text-black sticky top-4 shadow-sm">
             <p className="text-sm font-bold mb-1 text-gray-600">جمع کل سبد</p>
@@ -1333,7 +1918,6 @@ function FastSellTab({ customers, onSaleComplete }) {
         </div>
       </div>
 
-      {/* Per-item modal */}
       {activeProduct && (
         <FastSellItemModal
           product={activeProduct}
@@ -1355,7 +1939,7 @@ function FastSellTab({ customers, onSaleComplete }) {
           transition: all 0.2s;
         }
         .form-input:focus {
-          border-color: #f97316; /* Orange focus */
+          border-color: #f97316;
           box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.15);
         }
         .form-input::placeholder { color: #9ca3af; }
@@ -1365,20 +1949,15 @@ function FastSellTab({ customers, onSaleComplete }) {
 }
 
 /* ============================================================
-   FAST SELL — item modal (pick unit, qty, price, deduct priority, sell based on → add)
+   FAST SELL ITEM MODAL
    ============================================================ */
 function FastSellItemModal({ product, onClose, onAdd }) {
-  
-  // 1. READ THE EXACT STRUCTURE FROM YOUR BACKEND (ProductController@stockAll)
-  const stockData = useMemo(() => {
-    return {
-      cartons: Number(product.module?.stock) || 0,
-      cans: Number(product.sub_module?.stock) || 0,
-      pieces: Number(product.sub_sub_module?.stock) || 0,
-    };
-  }, [product]);
+  const stockData = useMemo(() => ({
+    cartons: Number(product.module?.stock) || 0,
+    cans: Number(product.sub_module?.stock) || 0,
+    pieces: Number(product.sub_sub_module?.stock) || 0,
+  }), [product]);
 
-  // 2. BUILD ALL AVAILABLE UNITS DYNAMICALLY
   const availableUnits = useMemo(() => {
     const list = [];
     if (product.module?.name) {
@@ -1393,15 +1972,13 @@ function FastSellItemModal({ product, onClose, onAdd }) {
     return list;
   }, [product, stockData]);
 
-  // State
-  const [saleUnit, setSaleUnit] = useState(availableUnits[0]?.v || 'module'); 
+  const [saleUnit, setSaleUnit] = useState(availableUnits[0]?.v || 'module');
   const [deductFrom, setDeductFrom] = useState('cartons');
   const [qty, setQty] = useState(1);
   const [currency, setCurrency] = useState(product.currency || 'AFN');
   const [exchangeRate, setExchangeRate] = useState(product.exchange_rate || '65');
   const [error, setError] = useState('');
-  
-  // 3. READ THE EXACT SELLING PRICES FROM YOUR BACKEND
+
   const suggestedPrices = useMemo(() => ({
     module: product.sell_price_module || '',
     sub_module: product.sell_price_sub_module || '',
@@ -1410,7 +1987,6 @@ function FastSellItemModal({ product, onClose, onAdd }) {
 
   const [unitPrice, setUnitPrice] = useState(suggestedPrices[availableUnits[0]?.v] || product.price || '');
 
-  // 4. AUTO-FILL PRICE WHEN UNIT CHANGES
   useEffect(() => {
     const newPrice = suggestedPrices[saleUnit];
     if (newPrice) {
@@ -1418,16 +1994,16 @@ function FastSellItemModal({ product, onClose, onAdd }) {
     } else {
       setUnitPrice(product.price || '');
     }
-    
+
     if (saleUnit === 'module') setDeductFrom('cartons');
     else if (saleUnit === 'sub_module') setDeductFrom('cans');
     else if (saleUnit === 'sub_sub_module') setDeductFrom('pieces');
-    
+
   }, [saleUnit, suggestedPrices, product.price]);
 
   const totalPrice = Number(qty || 0) * Number(unitPrice || 0);
   const conv = convertCurrency(totalPrice, currency, exchangeRate || 1);
-  
+
   const selectedUnitMeta = availableUnits.find(u => u.v === saleUnit) || availableUnits[0];
 
   const handleSubmit = (e) => {
@@ -1436,7 +2012,7 @@ function FastSellItemModal({ product, onClose, onAdd }) {
     if (!qty || Number(qty) <= 0) { setError('تعداد باید بزرگ‌تر از صفر باشد'); return; }
     if (unitPrice === '' || Number(unitPrice) < 0) { setError('قیمت را وارد کنید'); return; }
     if (!exchangeRate || Number(exchangeRate) <= 0) { setError('نرخ تبادل را وارد کنید'); return; }
-    
+
     if (selectedUnitMeta && Number(qty) > selectedUnitMeta.stock) {
       setError(`هشدار: موجودی ${selectedUnitMeta.label} کافی نیست (${selectedUnitMeta.stock})`);
       return;
@@ -1446,7 +2022,7 @@ function FastSellItemModal({ product, onClose, onAdd }) {
       product,
       sale_unit: saleUnit,
       sale_unit_label: selectedUnitMeta?.label || saleUnit,
-      price_based_on: saleUnit, 
+      price_based_on: saleUnit,
       deduct_from: deductFrom,
       qty: Number(qty),
       unit_price: Number(unitPrice),
@@ -1474,7 +2050,6 @@ function FastSellItemModal({ product, onClose, onAdd }) {
 
         <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
 
-          {/* Product preview */}
           <div className="flex items-center gap-3 p-3 bg-gray-50 border border-gray-300 rounded-2xl">
             {product.photo_url ? (
               <img src={product.photo_url} alt={product.name}
@@ -1492,7 +2067,6 @@ function FastSellItemModal({ product, onClose, onAdd }) {
             </div>
           </div>
 
-          {/* Stock breakdown */}
           <div className="flex gap-2">
             {availableUnits.map(u => (
               <div key={u.v} className="flex-1 bg-white border border-gray-300 rounded-xl p-2.5 text-center">
@@ -1508,7 +2082,6 @@ function FastSellItemModal({ product, onClose, onAdd }) {
             </div>
           )}
 
-          {/* 🚀 Unit Picker */}
           <div>
             <label className="text-sm font-bold text-black block mb-2">چند تا می‌فروشی؟ (واحد فروش)</label>
             <div className={`grid gap-2 ${availableUnits.length === 1 ? 'grid-cols-1' : availableUnits.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
@@ -1529,7 +2102,6 @@ function FastSellItemModal({ product, onClose, onAdd }) {
             </div>
           </div>
 
-          {/* Deduction Priority */}
           {availableUnits.length > 1 && (
             <div className="bg-gray-50 p-3 rounded-xl border border-gray-300">
               <label className="text-[11px] font-bold text-black block mb-2 flex items-center gap-1">
@@ -1552,7 +2124,6 @@ function FastSellItemModal({ product, onClose, onAdd }) {
             </div>
           )}
 
-          {/* Qty + Price */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-sm font-bold text-black block mb-2">تعداد</label>
@@ -1569,7 +2140,6 @@ function FastSellItemModal({ product, onClose, onAdd }) {
             </div>
           </div>
 
-          {/* Currency */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-sm font-bold text-black block mb-2">ارز</label>
@@ -1592,7 +2162,6 @@ function FastSellItemModal({ product, onClose, onAdd }) {
             </div>
           </div>
 
-          {/* Line total */}
           {unitPrice && qty > 0 && (
             <div className="bg-gray-50 border border-gray-300 rounded-2xl p-4">
               <div className="flex items-baseline justify-between">
@@ -1645,7 +2214,7 @@ function FastSellItemModal({ product, onClose, onAdd }) {
 }
 
 /* ============================================================
-   INVOICE MODAL — Products-page style (Paper Print Layout)
+   INVOICE MODAL
    ============================================================ */
 function InvoiceModal({ invoice, onClose }) {
   const printRef = useRef(null);
@@ -1663,6 +2232,7 @@ function InvoiceModal({ invoice, onClose }) {
   const customerName = sales[0]?.customer_name || 'مشتری نقدی';
   const customerPhone = sales[0]?.customer?.phone || '—';
   const customerAddress = sales[0]?.customer?.address || '—';
+  const loanReturnDate = sales.find(s => s.assigned_loan_return_date)?.assigned_loan_return_date || null;
 
   const handlePrint = () => {
     if (!printRef.current) return;
@@ -1675,23 +2245,6 @@ function InvoiceModal({ invoice, onClose }) {
         <style>
           * { font-family: Tahoma, Arial, sans-serif; box-sizing: border-box; margin:0; padding:0; }
           body { padding: 30px; background:#fff; color:#111; }
-          .inv-header { display:flex; justify-content:space-between; align-items:center; border-bottom:3px double #000; padding-bottom:16px; margin-bottom:20px; }
-          .brand { font-size:22px; font-weight:900; color:#000; }
-          .brand small { display:block; font-size:11px; color:#6b7280; font-weight:400; margin-top:4px; }
-          .inv-num { text-align:left; }
-          .inv-num .num { font-family:monospace; font-size:16px; font-weight:900; }
-          .inv-num .date { font-size:12px; color:#6b7280; font-family:monospace; margin-top:4px; }
-          .inv-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:18px; }
-          .inv-card { background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:14px; }
-          .inv-card h4 { margin:0 0 8px; color:#000; font-size:12px; border-bottom:1px solid #e5e7eb; padding-bottom:6px; }
-          .inv-card p { margin:4px 0; font-size:13px; }
-          table { width:100%; border-collapse:collapse; }
-          th { background:#f97316; color:#fff; padding:10px; font-size:12px; }
-          td { padding:10px; font-size:13px; border-bottom:1px solid #f3f4f6; text-align:center; }
-          .totals { margin-top:18px; margin-right:auto; width:320px; }
-          .totals .row { display:flex; justify-content:space-between; padding:8px 12px; border-bottom:1px solid #f3f4f6; font-size:13px; }
-          .totals .big { background:#f3f4f6; font-weight:900; font-size:15px; border:none; border-radius:6px; margin-top:6px; padding:10px 12px; }
-          .footer { margin-top:50px; text-align:center; font-size:11px; color:#9ca3af; border-top:1px dashed #e5e7eb; padding-top:12px; }
         </style>
       </head>
       <body>${printContents}</body>
@@ -1719,8 +2272,6 @@ function InvoiceModal({ invoice, onClose }) {
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden my-8">
-        
-        {/* HEADER — EXACT MATCH TO BILL PREVIEW (Products Page) */}
         <div className="bg-orange-500 p-5 flex items-center justify-between">
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
             <FileText size={22} /> پیش‌نمایش فاکتور
@@ -1738,11 +2289,8 @@ function InvoiceModal({ invoice, onClose }) {
           </div>
         </div>
 
-        {/* PAPER STYLE CONTENT */}
         <div className="p-8 bg-gray-100 max-h-[80vh] overflow-y-auto">
           <div ref={printRef} className="bg-white p-10 mx-auto shadow-sm" style={{ width: '210mm', minHeight: '297mm', fontFamily: 'Tahoma, Arial, sans-serif', direction: 'rtl', color: '#000' }}>
-            
-            {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #f97316', paddingBottom: '20px', marginBottom: '30px' }}>
               <div>
                 <h1 style={{ fontSize: '28px', fontWeight: 'bold', color: '#f97316', margin: 0 }}>نام فروشگاه شما</h1>
@@ -1755,13 +2303,17 @@ function InvoiceModal({ invoice, onClose }) {
               </div>
             </div>
 
-            {/* Customer / Info */}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '30px' }}>
               <div style={{ width: '45%' }}>
                 <p style={{ fontSize: '12px', fontWeight: 'bold', margin: '0 0 5px 0', color: '#f97316' }}>اطلاعات مشتری:</p>
                 <p style={{ fontSize: '12px', margin: '2px 0' }}>نام: <b>{customerName}</b></p>
                 <p style={{ fontSize: '12px', margin: '2px 0' }}>تلفن: {customerPhone}</p>
                 <p style={{ fontSize: '12px', margin: '2px 0' }}>آدرس: {customerAddress}</p>
+                {loanReturnDate && (
+                  <p style={{ fontSize: '12px', margin: '2px 0', color: '#b45309' }}>
+                    تاریخ برگشت قرض: <b>{loanReturnDate}</b>
+                  </p>
+                )}
               </div>
               <div style={{ width: '45%' }}>
                 <p style={{ fontSize: '12px', fontWeight: 'bold', margin: '0 0 5px 0', color: '#f97316' }}>اطلاعات فاکتور:</p>
@@ -1769,7 +2321,6 @@ function InvoiceModal({ invoice, onClose }) {
               </div>
             </div>
 
-            {/* Table */}
             <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '30px' }}>
               <thead>
                 <tr style={{ backgroundColor: '#fff7ed', borderTop: '2px solid #f97316', borderBottom: '2px solid #f97316' }}>
@@ -1796,7 +2347,6 @@ function InvoiceModal({ invoice, onClose }) {
               </tbody>
             </table>
 
-            {/* Totals */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '40px' }}>
               <div style={{ width: '50%' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -1822,7 +2372,6 @@ function InvoiceModal({ invoice, onClose }) {
               </div>
             </div>
 
-            {/* Signatures */}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '50px', paddingTop: '20px' }}>
               <div style={{ textAlign: 'center', width: '40%' }}>
                 <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '30px' }}>امضای فروشنده</p>
@@ -1845,7 +2394,7 @@ function InvoiceModal({ invoice, onClose }) {
 }
 
 /* ============================================================
-   KPI CARD
+   KPI CARD (بدون بج)
    ============================================================ */
 function KpiCard({ icon, label, value, valueAfn, valueUsd, color }) {
   return (
@@ -1878,7 +2427,7 @@ function KpiCard({ icon, label, value, valueAfn, valueUsd, color }) {
 }
 
 /* ============================================================
-   SALE FORM MODAL — with multi-item builder logic
+   SALE FORM MODAL
    ============================================================ */
 function SaleFormModal({ customers, products, onClose, onSaved }) {
   const [items, setItems] = useState([]);
@@ -1892,6 +2441,7 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
     exchange_rate: '65',
     payment_type: 'cash',
     paid_amount: '',
+    assigned_loan_return_date: '',
     note: '',
     sale_date: getTodayPersian(),
   });
@@ -1929,10 +2479,9 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
     setForm(f => ({ ...f, sale_unit: unit, currency: 'AFN', exchange_rate: '65' }));
   }, [selectedProduct]);
 
-  // 🚀 AUTO-FILL PRICE
   useEffect(() => {
     if (!selectedProduct) return;
-    
+
     let suggested = null;
     if (form.sale_unit === 'module') suggested = selectedProduct.sell_price_module;
     else if (form.sale_unit === 'sub_module') suggested = selectedProduct.sell_price_sub_module;
@@ -1984,7 +2533,6 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
     : Math.min(Number(form.paid_amount) || 0, totalPrice);
   const remainingAmount = Math.max(0, totalPrice - paidAmount);
 
-  // Add current draft to the items list
   const addDraftToItems = () => {
     if (!form.product_id) { setError('محصول را انتخاب کنید'); return; }
     if (!form.qty_sold || Number(form.qty_sold) <= 0) { setError('تعداد فروش باید بزرگ‌تر از صفر باشد'); return; }
@@ -1999,7 +2547,6 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
       unitLabel,
     }]);
 
-    // Reset draft (keep customer, date, etc)
     setForm(f => ({
       ...f,
       product_id: '',
@@ -2007,6 +2554,7 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
       unit_price: '',
       payment_type: 'cash',
       paid_amount: '',
+      assigned_loan_return_date: '',
     }));
     setPreview(null);
     setError('');
@@ -2021,7 +2569,6 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
 
     let finalItems = [...items];
 
-    // If the user typed a product but forgot to click "Add", auto-add it
     if (form.product_id && form.qty_sold > 0 && form.unit_price) {
       const unitLabel = availableUnits.find(u => u.v === form.sale_unit)?.label || form.sale_unit;
       finalItems.push({
@@ -2064,7 +2611,6 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
 
     const createdSaleIds = [];
     try {
-      // 1. Create individual sales
       for (const it of finalItems) {
         const payload = {
           customer_id: customerId,
@@ -2076,6 +2622,10 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
           exchange_rate: Number(it.form.exchange_rate),
           payment_type: it.form.payment_type,
           paid_amount:  it.form.payment_type === 'loan_partial' ? Number(it.form.paid_amount) : undefined,
+          assigned_loan_return_date:
+            it.form.payment_type !== 'cash' && it.form.assigned_loan_return_date
+              ? it.form.assigned_loan_return_date
+              : null,
           note:         it.form.note || null,
           sale_date:    it.form.sale_date || null,
         };
@@ -2083,7 +2633,6 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
         createdSaleIds.push(sale.id);
       }
 
-      // 2. Create one combined invoice
       let createdInvoice = null;
       try {
         const { data } = await api.post('/sale-invoices/multi', {
@@ -2093,7 +2642,6 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
         });
         createdInvoice = data;
       } catch (err) {
-        // ✅ Catch the Duplicate Entry error from backend
         console.error('Backend failed to generate invoice (Duplicate?), gracefully handling', err?.response?.data);
         createdInvoice = {
           id: `temp-${Date.now()}`,
@@ -2106,14 +2654,13 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
         };
       }
 
-      // Fetch individual sales to populate .sales array securely
       const fetchedSales = await Promise.all(
         createdSaleIds.map(id => api.get(`/sales/${id}`).then(r => r.data).catch(() => null))
       );
-      
-      const invoice = { 
-        ...createdInvoice, 
-        sales: fetchedSales.filter(Boolean) 
+
+      const invoice = {
+        ...createdInvoice,
+        sales: fetchedSales.filter(Boolean)
       };
 
       onSaved({ invoice });
@@ -2148,7 +2695,7 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
         )}
 
         <form onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[80vh] overflow-y-auto">
-          
+
           {error && (
             <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex items-start gap-2 text-rose-600">
               <AlertCircle size={18} className="mt-0.5 shrink-0" />
@@ -2156,7 +2703,6 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
             </div>
           )}
 
-          {/* ADDED ITEMS LIST */}
           {items.length > 0 && (
             <div className="space-y-2">
               <h4 className="font-bold text-gray-700 text-sm flex items-center gap-2 mb-2">
@@ -2173,6 +2719,11 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
                       <p className="text-[11px] text-gray-500">
                         {it.form.qty_sold} × {it.unitLabel} — {Number(it.form.unit_price).toLocaleString()} {it.form.currency}
                       </p>
+                      {it.form.payment_type !== 'cash' && it.form.assigned_loan_return_date && (
+                        <p className="text-[10px] text-amber-700 font-bold mt-0.5">
+                          برگشت قرض: {it.form.assigned_loan_return_date}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <button type="button" onClick={() => removeItem(it.localId)}
@@ -2184,7 +2735,6 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
             </div>
           )}
 
-          {/* DRAFT FORM */}
           <div className="border-2 border-dashed border-gray-300 rounded-2xl p-4 bg-gray-50">
             <div className="flex items-center gap-2 mb-4">
               <div className="w-7 h-7 rounded-lg bg-orange-500 text-white flex items-center justify-center">
@@ -2354,7 +2904,6 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
                   <Info size={14} /> پیش‌نمایش موجودی
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  {/* CURRENT STOCK */}
                   <div className="bg-gray-50 border border-gray-300 rounded-xl p-3">
                     <p className="text-[10px] text-gray-600 font-bold mb-2">موجودی فعلی</p>
                     <div className="text-xs text-black font-bold space-y-1">
@@ -2382,7 +2931,6 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
                     </div>
                   </div>
 
-                  {/* REMAINING STOCK */}
                   <div className="bg-gray-50 border border-gray-300 rounded-xl p-3">
                     <p className="text-[10px] text-gray-600 font-bold mb-2">بعد از فروش</p>
                     <div className="text-xs text-black font-bold space-y-1">
@@ -2500,6 +3048,18 @@ function SaleFormModal({ customers, products, onClose, onSaved }) {
                 </div>
               )}
 
+              {form.payment_type !== 'cash' && (
+                <div className="mt-4">
+                  <FormField label="تاریخ برگشت قرض (اختیاری)">
+                    <PersianDatePicker
+                      value={form.assigned_loan_return_date}
+                      onChange={(v) => update('assigned_loan_return_date', v)}
+                      placeholder="1405-05-05"
+                    />
+                  </FormField>
+                </div>
+              )}
+
               {form.unit_price && form.qty_sold && (
                 <div className="mt-4 grid grid-cols-2 gap-3">
                   <div className="bg-white border border-gray-300 rounded-xl p-3">
@@ -2589,14 +3149,17 @@ function FormField({ label, required, children }) {
 /* ============================================================
    PAY SALE MODAL
    ============================================================ */
-function PaySaleModal({ sale, onClose, onPaid }) {
+function PaySaleModal({ sale, onClose, onPaid, onRequestReturn }) {
   const remaining = Number(sale.remaining_amount) || 0;
   const rate = Number(sale.exchange_rate) || 1;
   const curr = String(sale.currency || 'AFN').toUpperCase();
 
   const [amount, setAmount] = useState(remaining);
+  const [paymentDate, setPaymentDate] = useState(getTodayPersian());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const [receipt, setReceipt] = useState(null);
 
   const inputConv = convertCurrency(Number(amount) || 0, curr, rate);
 
@@ -2608,14 +3171,47 @@ function PaySaleModal({ sale, onClose, onPaid }) {
     setLoading(true);
     setError('');
     try {
-      await api.post(`/sales/${sale.id}/pay`, { amount: amt });
-      onPaid();
+      const { data } = await api.post(`/sales/${sale.id}/pay`, {
+        amount: amt,
+        payment_date: paymentDate,
+      });
+
+      const paidSale = data?.sale || data;
+      const payment =
+        data?.payment || {
+          id: Date.now().toString().slice(-6),
+          receipt_number: `RC-${Date.now().toString().slice(-6)}`,
+          amount: amt,
+          paid_before: Number(sale.paid_amount) || 0,
+          remaining_after: Math.max(0, remaining - amt),
+          initial_amount: Number(sale.total_price) || 0,
+          invoice_number: sale.invoice_number,
+          product_name: sale.product_name,
+          customer_name: sale.customer_name,
+          payment_date: paymentDate,
+          currency: curr,
+        };
+
+      setReceipt({ payment, sale: paidSale });
     } catch (e) {
       setError(e.response?.data?.message || 'خطا در پرداخت');
     } finally {
       setLoading(false);
     }
   };
+
+  if (receipt) {
+    return (
+      <SalePaymentReceiptModal
+        payment={receipt.payment}
+        sale={receipt.sale}
+        onClose={() => {
+          setReceipt(null);
+          onPaid();
+        }}
+      />
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
@@ -2638,6 +3234,11 @@ function PaySaleModal({ sale, onClose, onPaid }) {
             <p className="text-xs text-gray-600 font-mono">{sale.invoice_number}</p>
             {sale.sale_date && (
               <p className="text-xs text-gray-600 font-mono">تاریخ فروش: {sale.sale_date}</p>
+            )}
+            {sale.assigned_loan_return_date && (
+              <p className="text-xs text-amber-700 font-mono font-bold">
+                تاریخ برگشت قرض: {sale.assigned_loan_return_date}
+              </p>
             )}
 
             <div className="mt-3 space-y-2 text-sm">
@@ -2672,12 +3273,25 @@ function PaySaleModal({ sale, onClose, onPaid }) {
             </div>
           </div>
 
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-black">تاریخ پرداخت (شمسی) <span className="text-rose-500">*</span></label>
+            <PersianDatePicker value={paymentDate} onChange={setPaymentDate} />
+          </div>
+
           {error && (
             <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex gap-2 text-rose-700 text-xs font-bold">
               <AlertCircle size={16} className="shrink-0 mt-0.5" />
               <span>{error}</span>
             </div>
           )}
+
+          <button
+            type="button"
+            onClick={() => onRequestReturn?.(sale)}
+            className="w-full bg-white border-2 border-dashed border-orange-500 hover:bg-orange-50 text-orange-600 font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2 text-sm"
+          >
+            <RotateCcw size={16} /> برگشت محصول (برگشت خورده)
+          </button>
 
           <div className="flex gap-3 pt-2">
             <button onClick={submit} disabled={loading}
@@ -2688,6 +3302,139 @@ function PaySaleModal({ sale, onClose, onPaid }) {
               className="px-6 py-3 rounded-xl bg-white border border-gray-300 hover:bg-gray-100 text-black font-bold transition-colors">
               انصراف
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   SALE PAYMENT RECEIPT MODAL
+   ============================================================ */
+function SalePaymentReceiptModal({ payment, sale, onClose }) {
+  const receiptRef = useRef(null);
+  const [generating, setGenerating] = useState(false);
+
+  const curr = payment.currency || sale?.currency || 'AFN';
+  const remainingAfter = Number(payment.remaining_after ?? 0);
+  const isFullyPaid = remainingAfter <= 0;
+
+  const handlePrint = () => {
+    if (!receiptRef.current) return;
+    const w = window.open('', '', 'height=600,width=800');
+    w.document.write('<html><head><title>رسید پرداخت</title>');
+    w.document.write('<style>body { font-family: Tahoma, Arial, sans-serif; direction: rtl; padding: 20px; }</style>');
+    w.document.write('</head><body>');
+    w.document.write(receiptRef.current.innerHTML);
+    w.document.write('</body></html>');
+    w.document.close();
+    w.focus();
+    setTimeout(() => { w.print(); w.close(); }, 500);
+  };
+
+  const handlePdf = async () => {
+    try {
+      const html2canvas = (await import('html2canvas')).default;
+      const { jsPDF } = await import('jspdf');
+      if (!receiptRef.current) return;
+      setGenerating(true);
+      const canvas = await html2canvas(receiptRef.current, {
+        scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false,
+      });
+      const img = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a5');
+      const pageW = pdf.internal.pageSize.getWidth();
+      const imgW = pageW - 10;
+      const imgH = (canvas.height * imgW) / canvas.width;
+      pdf.addImage(img, 'PNG', 5, 5, imgW, imgH);
+      pdf.save(`receipt-${payment.receipt_number || payment.id}.pdf`);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden my-8 border border-gray-300">
+
+        <div className="bg-emerald-600 p-4 flex items-center justify-between print:hidden">
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <CheckCircle2 size={22} /> رسید پرداخت قرض مشتری
+          </h3>
+          <div className="flex gap-2">
+            <button onClick={handlePdf} disabled={generating}
+              className="bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1">
+              {generating ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} PDF
+            </button>
+            <button onClick={handlePrint}
+              className="bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1">
+              <Printer size={14} /> چاپ
+            </button>
+            <button onClick={onClose}
+              className="bg-rose-500 hover:bg-rose-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">
+              بستن
+            </button>
+          </div>
+        </div>
+
+        <div className="p-6 bg-gray-50 max-h-[80vh] overflow-y-auto">
+          <div ref={receiptRef} className="bg-white p-6 shadow-sm border border-gray-200" style={{ minHeight: '420px', position: 'relative' }}>
+            <div className="text-center border-b-2 border-dashed border-gray-300 pb-4 mb-4">
+              <h2 className="text-xl font-black text-black mb-1">رسید پرداخت قرض مشتری</h2>
+              <p className="text-xs text-gray-500">
+                شماره رسید: <span className="font-mono font-bold">{payment.receipt_number || `RC-${payment.id}`}</span>
+              </p>
+            </div>
+
+            <div className="space-y-3 text-sm">
+              <div className="flex justify-between items-center border-b border-gray-100 pb-2">
+                <span className="text-gray-500 font-bold">مشتری:</span>
+                <span className="font-bold text-black">{payment.customer_name || sale?.customer_name || '—'}</span>
+              </div>
+              <div className="flex justify-between items-center border-b border-gray-100 pb-2">
+                <span className="text-gray-500 font-bold">شماره فاکتور:</span>
+                <span className="font-mono font-bold text-black">{payment.invoice_number || sale?.invoice_number || '—'}</span>
+              </div>
+              <div className="flex justify-between items-center border-b border-gray-100 pb-2">
+                <span className="text-gray-500 font-bold">نام محصول:</span>
+                <span className="font-bold text-black">{payment.product_name || sale?.product_name || '—'}</span>
+              </div>
+              <div className="flex justify-between items-center border-b border-gray-100 pb-2">
+                <span className="text-gray-500 font-bold">تاریخ پرداخت:</span>
+                <span className="font-mono font-bold text-black">{payment.payment_date}</span>
+              </div>
+            </div>
+
+            <div className="bg-amber-50 rounded-xl p-3 border border-amber-100 mt-4 space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-gray-600 font-bold text-xs">مبلغ کل قرضه:</span>
+                <span className="text-sm font-black text-black">{Number(payment.initial_amount || 0).toLocaleString()} {curr}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-gray-600 font-bold text-xs">پرداخت قبلی:</span>
+                <span className="text-sm font-bold text-gray-700">{Number(payment.paid_before || 0).toLocaleString()} {curr}</span>
+              </div>
+              <div className="flex justify-between items-center pt-2 border-t border-amber-200">
+                <span className="text-gray-700 font-bold text-xs">مبلغ پرداخت شده:</span>
+                <span className="text-lg font-black text-emerald-700">{Number(payment.amount || 0).toLocaleString()} {curr}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-gray-600 font-bold text-xs">باقی‌مانده بعد از پرداخت:</span>
+                {isFullyPaid
+                  ? <span className="text-sm font-black text-emerald-600 flex items-center gap-1"><CheckCircle2 size={14} /> تصفیه شد</span>
+                  : <span className="text-sm font-black text-rose-600">{remainingAfter.toLocaleString()} {curr}</span>}
+              </div>
+            </div>
+
+            <div className="mt-8 pt-4 border-t border-dashed border-gray-300 text-center">
+              <div className="w-16 h-16 mx-auto border-2 border-emerald-500 rounded-full flex items-center justify-center transform -rotate-12 opacity-80 mb-2">
+                <span className="text-emerald-500 font-black text-[10px] text-center leading-tight">تایید<br/>شده</span>
+              </div>
+              <p className="text-[10px] text-gray-400 mt-2">این رسید به صورت خودکار توسط سیستم تولید شده است.</p>
+            </div>
           </div>
         </div>
       </div>

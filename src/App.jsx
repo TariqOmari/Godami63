@@ -13,6 +13,10 @@ import Sales from './pages/Sales';
 import SalesInvlices from './pages/SalesInvlices';
 import Loans from './pages/Loans';// Import the Loans component
 import Capital from './pages/Capital'; // Import the Capital component
+import SoldBackReturned from './pages/SoldBackReturned';
+import Notification from './pages/Notification'; // Import the Notification component
+import Expenses from './pages/Expenses'; // Import the Expenses component
+import IncomesReport from './pages/IncomesReport'; // Import the IncomesReport component
 export default function App() {
   return (
     <div>
@@ -122,6 +126,45 @@ export default function App() {
               </RouteProtector>
             } 
           />
+
+            <Route 
+            path="/back-return" 
+            element={
+              <RouteProtector>
+                <SoldBackReturned />
+              </RouteProtector>
+            } 
+          />
+
+          <Route 
+            path="/notification" 
+            element={
+              <RouteProtector>
+                <Notification />
+              </RouteProtector>
+            } 
+          />
+
+
+            <Route 
+            path="/expenses" 
+            element={
+              <RouteProtector>
+                <Expenses />
+              </RouteProtector>
+            } 
+          />
+
+
+            <Route 
+            path="/incomes-report" 
+            element={
+              <RouteProtector>
+                <IncomesReport />
+              </RouteProtector>
+            } 
+          />
+
 
 
 
