@@ -161,6 +161,17 @@ const computeFinalPrice = (product, cartonQty) => {
   };
 };
 
+const computePurchaseTotal = (product, cartonQty) => {
+  const calc = computeFinalPrice(product, cartonQty);
+  const expenses = Number(product.expenses) || 0;
+
+  return {
+    ...calc,
+    expenses,
+    finalPrice: Math.round((calc.finalPrice + expenses) * 100) / 100,
+  };
+};
+
 // ============ SMART STOCK CALCULATOR ============
 const getStock = (product) => {
   let totalCartons = 0;
@@ -421,9 +432,6 @@ export default function Inventory() {
   const [detailsProduct, setDetailsProduct] = useState(null);
   const [restockProduct, setRestockProduct] = useState(null);
 
-  // ✅ New State for the Receipt
-  const [receiptData, setReceiptData] = useState(null);
-
   const [scannedProduct, setScannedProduct] = useState(null);
   const [gunStatus, setGunStatus] = useState(null);
   const gunTimerRef = useRef(null);
@@ -451,6 +459,35 @@ export default function Inventory() {
       const { data } = await api.get('/suppliers');
       setSuppliers(data);
     } catch (e) { console.error(e); }
+  };
+
+  const fetchBills = async () => {
+    try {
+      const { data } = await api.get('/purchase-bills');
+      const list = data?.data?.data ?? data?.data ?? data;
+      setBills(Array.isArray(list) ? list : []);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleViewBill = async (bill) => {
+    setOpeningBillId(bill.id);
+    try {
+      const { data } = await api.get(`/purchase-bills/${bill.id}`);
+      const details = normalizeBillDetails(data, bill);
+      const productIds = details.product_ids || bill.product_ids || [];
+
+      if (details.products.length === 0 && productIds.length > 0) {
+        throw new Error('Bill details did not include its products');
+      }
+
+      setShowBills(false);
+      setViewBill(details);
+    } catch (err) {
+      console.error('Failed to load purchase bill details', err);
+      setToast({ show: true, message: 'خطا در دریافت جزئیات فاکتور', type: 'warning' });
+    } finally {
+      setOpeningBillId(null);
+    }
   };
 
   useEffect(() => { fetchProducts(); }, []);
@@ -729,21 +766,20 @@ export default function Inventory() {
           <PayModal 
             product={payProduct} 
             onClose={() => setPayProduct(null)}
-            onPaid={async (updatedProduct, newPaymentObj) => {
+            onPaid={async (updatedProduct) => {
+              // 1. Close pay modal
               setPayProduct(null);
+              
+              // 2. Refresh products list in background
               await fetchProducts(searchTerm, paymentFilter, currencyFilter);
-              // ✅ Open the beautiful receipt modal
-              setReceiptData({ product: updatedProduct, payment: newPaymentObj });
+              
+              // 3. ✅ Re-open Details Modal with the UPDATED product to show the receipt immediately
+              if (updatedProduct) {
+                setDetailsProduct(updatedProduct);
+              }
+              
+              setToast({ show: true, message: 'پرداخت ثبت شد و رسید صادر گردید', type: 'success' });
             }} 
-          />
-        )}
-
-        {/* ✅ RECEIPT MODAL */}
-        {receiptData && (
-          <PaymentReceiptModal 
-            product={receiptData.product} 
-            payment={receiptData.payment} 
-            onClose={() => setReceiptData(null)} 
           />
         )}
 
@@ -771,6 +807,15 @@ export default function Inventory() {
             onCalc={(p) => { setScannedProduct(null); setCalcProduct(p); }}
             onBill={(p) => { setScannedProduct(null); setBillProduct(p); }}
             onRestock={(p) => { setScannedProduct(null); setRestockProduct(p); }}
+          />
+        )}
+
+        {showBills && (
+          <BillsListModal
+            bills={bills}
+            onClose={() => setShowBills(false)}
+            onView={handleViewBill}
+            openingBillId={openingBillId}
           />
         )}
 
@@ -1016,7 +1061,7 @@ function ProductCard({ product, onDetails, onPay, onCalc, onBill, onRestock, onE
 }
 
 /* ============================================================
-   PRODUCT DETAILS MODAL (Clean - No Payment History)
+   PRODUCT DETAILS MODAL (Simplified)
    ============================================================ */
 function ProductDetailsModal({ product, onClose, onPay, onCalc, onBill, onRestock, onEdit }) {
   return (
@@ -1034,7 +1079,7 @@ function ProductDetailsModal({ product, onClose, onPay, onCalc, onBill, onRestoc
 
         <div className="p-4 sm:p-6 space-y-4 max-h-[70vh] overflow-y-auto">
           <RestockHistoryTable product={product} />
-          {/* ✅ Payment History Removed from here as requested */}
+          <PaymentHistoryTable product={product} />
         </div>
 
         <div className="p-4 border-t border-gray-100 bg-gray-50 grid grid-cols-2 sm:grid-cols-5 gap-2">
@@ -1250,6 +1295,102 @@ function RestockHistoryTable({ product }) {
 }
 
 /* ============================================================
+   PAYMENT HISTORY TABLE (BEAUTIFUL CHECK/RECEIPT)
+   ============================================================ */
+/* ============================================================
+   PAYMENT HISTORY (BEAUTIFUL INDIVIDUAL CHECKS)
+   ============================================================ */
+function PaymentHistoryTable({ product }) {
+  const [payments, setPayments] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    api.get(`/products/${product.id}/payments`)
+      .then(res => setPayments(res.data))
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [product.id]);
+
+  if (loading) return <div className="text-xs text-gray-500 p-2 flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> در حال بارگذاری رسیدها...</div>;
+  if (payments.length === 0) return null;
+
+  // Sort oldest to newest to calculate remaining balance correctly per check
+  const sortedPayments = [...payments].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+  return (
+    <div className="mt-6 space-y-4">
+      <div className="flex items-center gap-2 mb-2">
+        <HandCoins size={20} className="text-amber-600" />
+        <h4 className="font-bold text-gray-800 text-sm">رسیدهای پرداخت قرضه</h4>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {sortedPayments.map((p, idx) => {
+          // Calculate remaining after THIS specific payment
+          const totalPaidSoFar = sortedPayments.slice(0, idx + 1).reduce((sum, pay) => sum + Number(pay.amount), 0);
+          const initialTotal = Number(product.final_price_afn) || 0;
+          const remainingAfter = Math.max(0, initialTotal - totalPaidSoFar);
+
+          return (
+            <div key={p.id} className="relative bg-white rounded-xl border-2 border-emerald-100 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+              
+              {/* Decorative Top Strip (Like a real check) */}
+              <div className="bg-gradient-to-r from-emerald-500 to-teal-500 h-2 w-full" />
+              
+              <div className="p-4 space-y-3">
+                {/* Header: Checkmark + Amount */}
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
+                      <CheckCircle2 size={18} />
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-500 font-bold">مبلغ پرداخت شده</p>
+                      <p className="text-lg font-black text-emerald-700" dir="ltr">
+                        {Number(p.amount).toLocaleString()} <span className="text-xs">AFN</span>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Info Grid */}
+                <div className="bg-gray-50 rounded-lg p-2.5 space-y-2 text-xs border border-gray-100">
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-500 font-bold flex items-center gap-1"><Calendar size={12} /> تاریخ:</span>
+                    <span className="font-mono font-bold text-gray-800">{p.payment_date}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-500 font-bold flex items-center gap-1"><Package size={12} /> محصول:</span>
+                    <span className="font-bold text-gray-800 truncate max-w-[120px]">{product.name}</span>
+                  </div>
+                </div>
+
+                {/* Remaining Balance Badge */}
+                <div className="pt-2 border-t border-dashed border-gray-200">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-gray-500 font-bold">باقی‌مانده بعد از این پرداخت:</span>
+                    {remainingAfter > 0 ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 font-bold text-[10px] border border-rose-100">
+                        <Clock size={10} /> {remainingAfter.toLocaleString()} AFN
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold text-[10px] border border-emerald-200">
+                        <CheckCircle2 size={10} /> تصفیه شد
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+/* ============================================================
    RESTOCK MODAL (AUTO-CALCULATES SUB UNITS)
    ============================================================ */
 function RestockModal({ product, onClose, onSaved }) {
@@ -1261,6 +1402,7 @@ function RestockModal({ product, onClose, onSaved }) {
     add_sub_module_qty: product.sub_module_name ? cansPerCarton : 0,
     add_sub_sub_module_qty: product.sub_sub_module_name ? (cansPerCarton * piecesPerCan) : 0,
     price: product.price || '',
+    expenses: '',
     price_mode: product.price_mode || 'module',
     currency: product.currency || 'AFN',
     exchange_rate: product.exchange_rate || '',
@@ -1296,10 +1438,11 @@ function RestockModal({ product, onClose, onSaved }) {
     }));
   };
 
-  const previewCalc = computeFinalPrice(
+  const previewCalc = computePurchaseTotal(
     {
       price_mode: form.price_mode,
       price: form.price,
+      expenses: form.expenses,
       sub_module_qty: product.sub_module_qty,
       sub_sub_module_qty: product.sub_sub_module_qty,
       module_name: product.module_name,
@@ -1329,6 +1472,7 @@ function RestockModal({ product, onClose, onSaved }) {
         add_sub_module_qty: Number(form.add_sub_module_qty) || 0,
         add_sub_sub_module_qty: Number(form.add_sub_sub_module_qty) || 0,
         price: form.price,
+        expenses: Number(form.expenses) || 0,
         price_mode: form.price_mode,
         currency: form.currency,
         exchange_rate: form.exchange_rate,
@@ -1408,6 +1552,11 @@ function RestockModal({ product, onClose, onSaved }) {
               </select>
             </FormField>
           </div>
+
+          <FormField label="مصارف">
+            <input className="form-input" type="number" min="0" step="0.01" value={form.expenses}
+              onChange={e => update('expenses', e.target.value)} dir="ltr" placeholder="0" />
+          </FormField>
 
           <div className="grid grid-cols-2 gap-2">
             <FormField label="ارز" required>
@@ -1550,6 +1699,7 @@ function BillForm({ editProduct, suppliers, onClose, onSaved }) {
     sub_sub_module_qty: '',
     price_mode: 'module',
     price: '',
+    expenses: '',
     currency: 'AFN',
     exchange_rate: '',
     stock_entry_date: getTodayPersian(),
@@ -1559,7 +1709,9 @@ function BillForm({ editProduct, suppliers, onClose, onSaved }) {
     paid_amount: '',
     assigned_loan_return_date: '',
     low_stock_warning: '',
+    low_stock_warning_mode: 'module',
     high_stock_warning: '',
+    high_stock_warning_mode: 'module',
     
     sell_price_module: '',
     sell_price_sub_module: '',
@@ -1582,6 +1734,7 @@ function BillForm({ editProduct, suppliers, onClose, onSaved }) {
           sub_sub_module_qty: editProduct.sub_sub_module_qty || '',
           price_mode: editProduct.price_mode || 'module',
           price: editProduct.price || '',
+          expenses: editProduct.expenses ?? '',
           currency: editProduct.currency || 'AFN',
           exchange_rate: editProduct.exchange_rate || '',
           stock_entry_date: editProduct.stock_entry_date || getTodayPersian(),
@@ -1591,7 +1744,9 @@ function BillForm({ editProduct, suppliers, onClose, onSaved }) {
           paid_amount: editProduct.paid_amount || '',
           assigned_loan_return_date: editProduct.assigned_loan_return_date || '',
           low_stock_warning: editProduct.low_stock_warning || '',
+          low_stock_warning_mode: editProduct.low_stock_warning_mode || 'module',
           high_stock_warning: editProduct.high_stock_warning || '',
+          high_stock_warning_mode: editProduct.high_stock_warning_mode || 'module',
           
           sell_price_module: editProduct.sell_price_module || '',
           sell_price_sub_module: editProduct.sell_price_sub_module || '',
@@ -1613,7 +1768,24 @@ function BillForm({ editProduct, suppliers, onClose, onSaved }) {
   const [showSubSubUnit, setShowSubSubUnit] = useState(!!editProduct?.sub_sub_module_name);
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  const update = (k, v) => { setForm((f) => ({ ...f, [k]: v })); setErrors((e) => ({ ...e, [k]: null })); };
+  const update = (k, v) => {
+    setForm((f) => {
+      const next = { ...f, [k]: v };
+      if (k === 'sub_module_name' && !v) {
+        next.low_stock_warning_mode = 'module';
+        next.high_stock_warning_mode = 'module';
+      } else if (k === 'sub_sub_module_name' && !v) {
+        if (next.low_stock_warning_mode === 'sub_sub_module') {
+          next.low_stock_warning_mode = next.sub_module_name ? 'sub_module' : 'module';
+        }
+        if (next.high_stock_warning_mode === 'sub_sub_module') {
+          next.high_stock_warning_mode = next.sub_module_name ? 'sub_module' : 'module';
+        }
+      }
+      return next;
+    });
+    setErrors((e) => ({ ...e, [k]: null }));
+  };
   const updateNewSupplier = (k, v) => { setNewSupplier((s) => ({ ...s, [k]: v })); setErrors((e) => ({ ...e, [`supplier_${k}`]: null })); };
 
   const handlePhoto = (e) => {
@@ -1801,10 +1973,11 @@ function BillForm({ editProduct, suppliers, onClose, onSaved }) {
     }
   };
 
-  const previewCalc = computeFinalPrice(
+  const previewCalc = computePurchaseTotal(
     {
       price_mode: form.price_mode,
       price: form.price,
+      expenses: form.expenses,
       sub_module_qty: form.sub_module_qty,
       sub_sub_module_qty: form.sub_sub_module_qty,
       module_name: form.module_name,
@@ -1826,7 +1999,7 @@ function BillForm({ editProduct, suppliers, onClose, onSaved }) {
 
   const totalItems = items.length;
   const totalAmount = items.reduce((sum, it) => {
-    const c = computeFinalPrice(
+    const c = computePurchaseTotal(
       { ...it.form, price_mode: it.form.price_mode },
       it.cartonQty
     );
@@ -1869,7 +2042,7 @@ function BillForm({ editProduct, suppliers, onClose, onSaved }) {
           {!isEdit && items.length > 0 && (
             <div className="space-y-2">
               {items.map((it, idx) => {
-                const c = computeFinalPrice({ ...it.form, price_mode: it.form.price_mode }, it.cartonQty);
+                const c = computePurchaseTotal({ ...it.form, price_mode: it.form.price_mode }, it.cartonQty);
                 const conv = convertCurrency(c.finalPrice, it.form.currency, it.form.exchange_rate || 1);
                 const isCollapsed = collapsed[it.localId] !== false;
                 return (
@@ -2123,6 +2296,11 @@ function BillForm({ editProduct, suppliers, onClose, onSaved }) {
                 </FormField>
               </div>
 
+              <FormField label="مصارف" error={errors.expenses?.[0]}>
+                <input className="form-input" type="number" min="0" step="0.01" value={form.expenses}
+                  onChange={(e) => update('expenses', e.target.value)} dir="ltr" placeholder="0" />
+              </FormField>
+
               <div className="grid grid-cols-2 gap-3">
                 <FormField label="ارز" required error={errors.currency?.[0]}>
                   <div className="grid grid-cols-2 gap-1.5">
@@ -2258,12 +2436,28 @@ function BillForm({ editProduct, suppliers, onClose, onSaved }) {
               {showAdvanced && (
                 <div className="p-3 pt-0 border-t border-gray-100 grid grid-cols-2 gap-3">
                   <FormField label="هشدار کمبود" error={errors.low_stock_warning?.[0]}>
-                    <input className="form-input" type="number" min="0" step="1" placeholder="مثلاً 50"
-                      value={form.low_stock_warning} onChange={(e) => update('low_stock_warning', e.target.value)} dir="ltr" />
+                    <div className="space-y-1">
+                      <input className="form-input" type="number" min="0" step="1" placeholder="مثلاً 50"
+                        value={form.low_stock_warning} onChange={(e) => update('low_stock_warning', e.target.value)} dir="ltr" />
+                      <select className="form-input" aria-label="واحد هشدار کمبود"
+                        value={form.low_stock_warning_mode} onChange={(e) => update('low_stock_warning_mode', e.target.value)}>
+                        <option value="module">{form.module_name || 'واحد اصلی'}</option>
+                        {form.sub_module_name && <option value="sub_module">{form.sub_module_name}</option>}
+                        {form.sub_sub_module_name && <option value="sub_sub_module">{form.sub_sub_module_name}</option>}
+                      </select>
+                    </div>
                   </FormField>
                   <FormField label="هشدار موجودی زیاد" error={errors.high_stock_warning?.[0]}>
-                    <input className="form-input" type="number" min="0" step="1" placeholder="مثلاً 1000"
-                      value={form.high_stock_warning} onChange={(e) => update('high_stock_warning', e.target.value)} dir="ltr" />
+                    <div className="space-y-1">
+                      <input className="form-input" type="number" min="0" step="1" placeholder="مثلاً 1000"
+                        value={form.high_stock_warning} onChange={(e) => update('high_stock_warning', e.target.value)} dir="ltr" />
+                      <select className="form-input" aria-label="واحد هشدار موجودی زیاد"
+                        value={form.high_stock_warning_mode} onChange={(e) => update('high_stock_warning_mode', e.target.value)}>
+                        <option value="module">{form.module_name || 'واحد اصلی'}</option>
+                        {form.sub_module_name && <option value="sub_module">{form.sub_module_name}</option>}
+                        {form.sub_sub_module_name && <option value="sub_sub_module">{form.sub_sub_module_name}</option>}
+                      </select>
+                    </div>
                   </FormField>
                 </div>
               )}
@@ -2899,15 +3093,8 @@ function PayModal({ product, onClose, onPaid }) {
         payment_date: paymentDate 
       });
       
-      // We also create a fake payment object for the receipt
-      const newPaymentObj = {
-         id: Date.now().toString().slice(-6), // Generate a quick receipt number
-         amount: amt,
-         payment_date: paymentDate
-      };
-
-      // ✅ Pass both to onPaid
-      onPaid(data, newPaymentObj); 
+      // ✅ Pass the updated product to onPaid
+      onPaid(data); 
     } catch (e) {
       setError(e.response?.data?.message || 'خطا در پرداخت');
     } finally {
@@ -2963,129 +3150,6 @@ function PayModal({ product, onClose, onPaid }) {
     </div>
   );
 }
-
-/* ============================================================
-   PAYMENT RECEIPT MODAL (THE BEAUTIFUL CHECK)
-   ============================================================ */
-function PaymentReceiptModal({ payment, product, onClose }) {
-  const receiptRef = useRef(null);
-  const [generating, setGenerating] = useState(false);
-
-  const handleDownloadPdf = async () => {
-    if (!receiptRef.current) return;
-    setGenerating(true);
-    try {
-      await new Promise(r => setTimeout(r, 200));
-      const canvas = await html2canvas(receiptRef.current, {
-        scale: 2, useCORS: true, backgroundColor: '#ffffff', logging: false,
-      });
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a5' }); // A5 size for receipt
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const pageHeight = pdf.internal.pageSize.getHeight();
-      const imgWidth = pageWidth - 10;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      
-      pdf.addImage(imgData, 'PNG', 5, 5, imgWidth, imgHeight);
-      pdf.save(`receipt-${payment.id}-${product.name}.pdf`);
-    } catch (e) {
-      console.error(e);
-      alert('خطا در ساخت PDF');
-    } finally { setGenerating(false); }
-  };
-
-  const handlePrint = () => {
-    const printWindow = window.open('', '', 'height=600,width=800');
-    printWindow.document.write('<html><head><title>رسید پرداخت</title>');
-    printWindow.document.write('<style>body { font-family: Tahoma, Arial, sans-serif; direction: rtl; padding: 20px; }</style>');
-    printWindow.document.write('</head><body>');
-    printWindow.document.write(receiptRef.current.innerHTML);
-    printWindow.document.write('</body></html>');
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => { printWindow.print(); printWindow.close(); }, 500);
-  };
-
-  const remainingAfter = Number(product.remaining_amount_afn || 0);
-
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden my-8">
-        
-        {/* Header */}
-        <div className="bg-emerald-600 p-4 flex items-center justify-between print:hidden">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2">
-            <CheckCircle2 size={22} /> رسید پرداخت قرضه
-          </h3>
-          <div className="flex gap-2">
-            <button onClick={handleDownloadPdf} disabled={generating} className="bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1">
-              {generating ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} PDF
-            </button>
-            <button onClick={handlePrint} className="bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1">
-              <Printer size={14} /> چاپ
-            </button>
-            <button onClick={onClose} className="bg-rose-500 hover:bg-rose-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold">بستن</button>
-          </div>
-        </div>
-
-        {/* The Receipt Paper */}
-        <div className="p-6 bg-gray-50 max-h-[80vh] overflow-y-auto">
-          <div ref={receiptRef} className="bg-white p-6 shadow-sm border border-gray-200" style={{ minHeight: '400px', position: 'relative' }}>
-            
-            {/* Receipt Header */}
-            <div className="text-center border-b-2 border-dashed border-gray-300 pb-4 mb-4">
-              <h2 className="text-xl font-black text-gray-800 mb-1">رسید پرداخت قرضه</h2>
-              <p className="text-xs text-gray-500">شماره رسید: <span className="font-mono font-bold">RC-{payment.id}</span></p>
-            </div>
-
-            {/* Receipt Body */}
-            <div className="space-y-4 text-sm">
-              <div className="flex justify-between items-center border-b border-gray-100 pb-2">
-                <span className="text-gray-500 font-bold">تامین کننده:</span>
-                <span className="font-bold text-gray-800">{product.supplier?.supplier_name || '—'}</span>
-              </div>
-              <div className="flex justify-between items-center border-b border-gray-100 pb-2">
-                <span className="text-gray-500 font-bold">نام محصول:</span>
-                <span className="font-bold text-gray-800">{product.name}</span>
-              </div>
-              <div className="flex justify-between items-center border-b border-gray-100 pb-2">
-                <span className="text-gray-500 font-bold">تاریخ پرداخت:</span>
-                <span className="font-mono font-bold text-gray-800">{payment.payment_date}</span>
-              </div>
-
-              <div className="bg-amber-50 rounded-xl p-3 border border-amber-100 mt-4">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-gray-600 font-bold text-xs">مبلغ پرداخت شده:</span>
-                  <span className="text-lg font-black text-emerald-700">{Number(payment.amount).toLocaleString()} AFN</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600 font-bold text-xs">باقی مانده کل قرضه:</span>
-                  {remainingAfter > 0 ? (
-                    <span className="text-sm font-black text-rose-600">{remainingAfter.toLocaleString()} AFN</span>
-                  ) : (
-                    <span className="text-sm font-black text-emerald-600 flex items-center gap-1"><CheckCircle2 size={14}/> تصفیه شد</span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Receipt Footer */}
-            <div className="mt-8 pt-4 border-t border-dashed border-gray-300 text-center">
-              <div className="w-16 h-16 mx-auto border-2 border-emerald-500 rounded-full flex items-center justify-center transform -rotate-12 opacity-80 mb-2">
-                <span className="text-emerald-500 font-black text-[10px] text-center leading-tight">تایید<br/>شده</span>
-              </div>
-              <p className="text-[10px] text-gray-400 mt-2">این رسید به صورت خودکار توسط سیستم تولید شده است.</p>
-            </div>
-            
-            {/* Decorative zig-zag bottom (optional but looks like a real receipt) */}
-            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '10px', background: 'linear-gradient(135deg, transparent 33.333%, #fff 33.333%, #fff 66.667%, transparent 66.667%), linear-gradient(45deg, transparent 33.333%, #fff 33.333%, #fff 66.667%, transparent 66.667%)', backgroundSize: '20px 20px', backgroundPosition: '0 0, 10px 0' }}></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /* ============================================================
    SMALL HELPERS
    ============================================================ */

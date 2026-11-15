@@ -100,7 +100,7 @@ export default function Sidbar({ isOpen, toggleSidebar }) {
     { title: 'مدیریت قرضه‌ها', path: '/loans', icon: <HandCoins size={22} /> },
     { title: 'مدیریت سرمایه و دخل', path: '/capital', icon: <Wallet size={22} /> },
     { title: 'مدیریت ثبت مصارف', path: '/expenses', icon: <CreditCard size={22} /> },
-    { title: 'گزارشات ثابت', path: '/incomes-report', icon: <HandCoins size={22} /> },
+    { title: 'عواید', path: '/incomes-report', icon: <HandCoins size={22} /> },
     {
       title: 'اعلان‌ها',
       path: '/notification',

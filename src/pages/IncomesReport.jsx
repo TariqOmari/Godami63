@@ -95,7 +95,6 @@ export default function IncomesReport() {
         return y === selYear && m === selMonth;
       }
       if (filterMode === 'week') {
-        // محاسبه ساده هفته (۱ تا ۷، ۸ تا ۱۴ و...)
         const startDay = (selWeek - 1) * 7 + 1;
         const endDay = selWeek * 7;
         return y === selYear && m === selMonth && d >= startDay && d <= endDay;
@@ -109,7 +108,7 @@ export default function IncomesReport() {
     return { filteredSales, filteredExpenses };
   }, [sales, expenses, filterMode, selYear, selMonth, selWeek]);
 
-  // محاسبات سود خالص
+  // محاسبات
   const stats = useMemo(() => {
     let totalRevenueAfn = 0;
     let totalRevenueUsd = 0;
@@ -117,14 +116,11 @@ export default function IncomesReport() {
     let totalExpensesAfn = 0;
     let totalExpensesUsd = 0;
 
-    let pureIncomeAfn = 0;
-    let pureIncomeUsd = 0;
+    let profitAfn = 0;
+    let profitUsd = 0;
 
-    // ۱. محاسبه سود فروش‌ها (فقط پول نقد!)
+    // ۱. محاسبه دخل و سود (دقیقا مثل منطق صفحه فروش)
     for (const s of filteredData.filteredSales) {
-      const paidAfn = Number(s.paid_amount_afn) || 0;
-      const paidUsd = Number(s.paid_amount_usd) || 0;
-      
       const totalAfn = Number(s.total_price_afn) || 0;
       const totalUsd = Number(s.total_price_usd) || 0;
       
@@ -134,20 +130,19 @@ export default function IncomesReport() {
       const profitTotal = Number(s.profit) || 0;
       const costPrice = Number(s.cost_price) || 0;
 
-      // پول نقدی که دست ما آمده
+      // پول نقدی که دست ما آمده (دخل)
       const saleCashAfn = Math.max(0, totalAfn - remainingAfn);
       const saleCashUsd = Math.max(0, totalUsd - remainingUsd);
 
       totalRevenueAfn += saleCashAfn;
       totalRevenueUsd += saleCashUsd;
 
-      // سود واقعی: اگر پول نقد بیشتر از سرمایه بود، مازادش سود است
+      // سود واقعی (دقیقا مثل کارت سود صفحه فروش)
       let saleProfitCash = 0;
       if (saleCashAfn > costPrice) {
         saleProfitCash = Math.min(saleCashAfn - costPrice, profitTotal);
       }
       
-      // معادل دالری این سود
       const rate = Number(s.exchange_rate) || 1;
       let saleProfitUsd = 0;
       if (String(s.currency).toUpperCase() === 'USD') {
@@ -156,8 +151,8 @@ export default function IncomesReport() {
         saleProfitUsd = saleProfitCash / rate;
       }
 
-      pureIncomeAfn += saleProfitCash;
-      pureIncomeUsd += saleProfitUsd;
+      profitAfn += saleProfitCash;
+      profitUsd += saleProfitUsd;
     }
 
     // ۲. محاسبه مصارف
@@ -174,13 +169,14 @@ export default function IncomesReport() {
       }
     }
 
-    // ۳. کسر مصارف از سود
-    pureIncomeAfn -= totalExpensesAfn;
-    pureIncomeUsd -= totalExpensesUsd;
+    // ۳. کسر مصارف از سود (درآمد خالص)
+    const pureIncomeAfn = profitAfn - totalExpensesAfn;
+    const pureIncomeUsd = profitUsd - totalExpensesUsd;
 
     return {
       totalRevenueAfn, totalRevenueUsd,
       totalExpensesAfn, totalExpensesUsd,
+      profitAfn, profitUsd,
       pureIncomeAfn, pureIncomeUsd,
       salesCount: filteredData.filteredSales.length,
       expensesCount: filteredData.filteredExpenses.length
@@ -301,127 +297,166 @@ export default function IncomesReport() {
           </div>
         </div>
 
-        {/* KPI CARDS */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-white p-5 rounded-2xl border border-gray-300 shadow-sm">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
-                <Wallet size={18} />
-              </div>
-              <span className="text-xs text-gray-600 font-bold">نقد جمع‌آوری شده</span>
-            </div>
-            <p className="text-2xl font-black text-emerald-700">{stats.totalRevenueAfn.toLocaleString()} <span className="text-xs">AFN</span></p>
-            <p className="text-xs font-bold text-gray-500 mt-1">$ {stats.totalRevenueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
+        {/* CONTENT / LOADER */}
+        {loading ? (
+          <div className="bg-white p-16 rounded-2xl shadow-sm border border-gray-300 flex flex-col items-center justify-center h-64">
+            <Loader2 size={40} className="animate-spin text-orange-500" />
+            <p className="text-gray-600 mt-4 text-sm font-bold">در حال محاسبه گزارش...</p>
           </div>
-
-          <div className="bg-white p-5 rounded-2xl border border-gray-300 shadow-sm">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-100">
-                <TrendingDown size={18} />
+        ) : (
+          <>
+            {/* KPI CARDS */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* ۱. دخل کل */}
+              <div className="bg-white p-5 rounded-2xl border border-gray-300 shadow-sm">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
+                    <Wallet size={18} />
+                  </div>
+                  <span className="text-xs text-gray-600 font-bold">دخل کل (نقد)</span>
+                </div>
+                <p className="text-2xl font-black text-emerald-700">{stats.totalRevenueAfn.toLocaleString()} <span className="text-xs">AFN</span></p>
+                <p className="text-xs font-bold text-gray-500 mt-1">$ {stats.totalRevenueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
               </div>
-              <span className="text-xs text-gray-600 font-bold">کل مصارف</span>
+
+              {/* ۲. سود کل */}
+              <div className="bg-white p-5 rounded-2xl border border-gray-300 shadow-sm">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+                    <TrendingUp size={18} />
+                  </div>
+                  <span className="text-xs text-gray-600 font-bold">سود کل</span>
+                </div>
+                <p className="text-2xl font-black text-blue-700">{stats.profitAfn.toLocaleString()} <span className="text-xs">AFN</span></p>
+                <p className="text-xs font-bold text-gray-500 mt-1">$ {stats.profitUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
+              </div>
+
+              {/* ۳. مصارف */}
+              <div className="bg-white p-5 rounded-2xl border border-gray-300 shadow-sm">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-100">
+                    <TrendingDown size={18} />
+                  </div>
+                  <span className="text-xs text-gray-600 font-bold">کل مصارف</span>
+                </div>
+                <p className="text-2xl font-black text-rose-600">{stats.totalExpensesAfn.toLocaleString()} <span className="text-xs">AFN</span></p>
+                <p className="text-xs font-bold text-gray-500 mt-1">$ {stats.totalExpensesUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
+              </div>
+
+              {/* ۴. درآمد خالص */}
+              <div className="bg-gradient-to-tr from-orange-500 to-orange-600 p-5 rounded-2xl border border-orange-400 shadow-lg text-white">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                    <DollarSign size={18} />
+                  </div>
+                  <span className="text-xs font-bold text-orange-50">درآمد خالص</span>
+                </div>
+                <p className="text-2xl font-black">{stats.pureIncomeAfn.toLocaleString()} <span className="text-xs">AFN</span></p>
+                <p className="text-xs font-bold text-orange-100 mt-1">$ {stats.pureIncomeUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
+              </div>
             </div>
-            <p className="text-2xl font-black text-rose-600">{stats.totalExpensesAfn.toLocaleString()} <span className="text-xs">AFN</span></p>
-            <p className="text-xs font-bold text-gray-500 mt-1">$ {stats.totalExpensesUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
-          </div>
 
-          <div className="bg-gradient-to-tr from-orange-500 to-orange-600 p-5 rounded-2xl border border-orange-400 shadow-lg text-white">
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                <DollarSign size={18} />
-              </div>
-              <span className="text-xs font-bold text-orange-50">سود خالص</span>
-            </div>
-            <p className="text-2xl font-black">{stats.pureIncomeAfn.toLocaleString()} <span className="text-xs">AFN</span></p>
-            <p className="text-xs font-bold text-orange-100 mt-1">$ {stats.pureIncomeUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
-          </div>
-        </div>
-
-        {/* ================= A4 PRINTABLE REPORT ================= */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-300 overflow-hidden p-4">
-          <div ref={printRef} className="bg-white p-10 mx-auto shadow-sm" style={{ width: '210mm', minHeight: '297mm', fontFamily: 'Tahoma, Arial, sans-serif', direction: 'rtl', color: '#000' }}>
-            
-            {/* Report Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #f97316', paddingBottom: '20px', marginBottom: '30px' }}>
-              <div>
-                <h1 style={{ fontSize: '28px', fontWeight: 'bold', color: '#f97316', margin: 0 }}>نام فروشگاه شما</h1>
-                <p style={{ fontSize: '12px', color: '#64748b', margin: '5px 0' }}>گزارش خالص درآمد و مصارف</p>
-              </div>
-              <div style={{ textAlign: 'left' }}>
-                <h2 style={{ fontSize: '22px', fontWeight: 'bold', color: '#111', margin: '0 0 5px 0' }}>صورت حساب درآمد</h2>
-                <p style={{ fontSize: '13px', margin: '2px 0' }}>دوره: <b>{periodLabel}</b></p>
-                <p style={{ fontSize: '13px', margin: '2px 0' }}>تاریخ چاپ: <b>{today.year}-{String(today.month).padStart(2, '0')}-{String(today.day).padStart(2, '0')}</b></p>
-              </div>
+            {/* FORMULA HINT */}
+            <div className="flex items-center justify-center gap-2 text-xs font-bold text-gray-500 bg-gray-50 p-3 rounded-xl border border-gray-200">
+              <span className="text-blue-700">سود کل</span>
+              <span>-</span>
+              <span className="text-rose-700">کل مصارف</span>
+              <span>=</span>
+              <span className="text-orange-600 text-sm">درآمد خالص</span>
             </div>
 
-            {/* Summary Table */}
-            <h3 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '10px', color: '#f97316' }}>خلاصه وضعیت مالی</h3>
-            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '30px' }}>
-              <thead>
-                <tr style={{ backgroundColor: '#fff7ed', borderTop: '1px solid #f97316', borderBottom: '1px solid #f97316' }}>
-                  <th style={{ padding: '10px', textAlign: 'right', fontSize: '13px' }}>عنوان</th>
-                  <th style={{ padding: '10px', textAlign: 'left', fontSize: '13px' }}>مبلغ (AFN)</th>
-                  <th style={{ padding: '10px', textAlign: 'left', fontSize: '13px' }}>مبلغ (USD)</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                  <td style={{ padding: '12px', fontSize: '13px' }}>۱. کل پول نقد جمع‌آوری شده از فروش</td>
-                  <td style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: 'bold' }}>{stats.totalRevenueAfn.toLocaleString()} AFN</td>
-                  <td style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: 'bold' }}>$ {stats.totalRevenueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                </tr>
-                <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
-                  <td style={{ padding: '12px', fontSize: '13px', color: '#dc2626' }}>۲. کل مصارف (هزینه‌ها)</td>
-                  <td style={{ padding: '12px', textAlign: 'left', fontSize: '13px', color: '#dc2626', fontWeight: 'bold' }}>{stats.totalExpensesAfn.toLocaleString()} AFN</td>
-                  <td style={{ padding: '12px', textAlign: 'left', fontSize: '13px', color: '#dc2626', fontWeight: 'bold' }}>$ {stats.totalExpensesUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                </tr>
-                <tr style={{ backgroundColor: '#f0fdf4', borderBottom: '1px solid #bbf7d0' }}>
-                  <td style={{ padding: '12px', fontSize: '14px', fontWeight: 'bold', color: '#166534' }}>سود خالص (۱ - ۲)</td>
-                  <td style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: 'bold', color: '#166534' }}>{stats.pureIncomeAfn.toLocaleString()} AFN</td>
-                  <td style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: 'bold', color: '#166534' }}>$ {stats.pureIncomeUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                </tr>
-              </tbody>
-            </table>
+            {/* ================= A4 PRINTABLE REPORT ================= */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-300 overflow-hidden p-4">
+              <div ref={printRef} className="bg-white p-10 mx-auto shadow-sm" style={{ width: '210mm', minHeight: '297mm', fontFamily: 'Tahoma, Arial, sans-serif', direction: 'rtl', color: '#000' }}>
+                
+                {/* Report Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #f97316', paddingBottom: '20px', marginBottom: '30px' }}>
+                  <div>
+                    <h1 style={{ fontSize: '28px', fontWeight: 'bold', color: '#f97316', margin: 0 }}>نام فروشگاه شما</h1>
+                    <p style={{ fontSize: '12px', color: '#64748b', margin: '5px 0' }}>گزارش خالص درآمد و مصارف</p>
+                  </div>
+                  <div style={{ textAlign: 'left' }}>
+                    <h2 style={{ fontSize: '22px', fontWeight: 'bold', color: '#111', margin: '0 0 5px 0' }}>صورت حساب درآمد</h2>
+                    <p style={{ fontSize: '13px', margin: '2px 0' }}>دوره: <b>{periodLabel}</b></p>
+                    <p style={{ fontSize: '13px', margin: '2px 0' }}>تاریخ چاپ: <b>{today.year}-{String(today.month).padStart(2, '0')}-{String(today.day).padStart(2, '0')}</b></p>
+                  </div>
+                </div>
 
-            {/* List of Expenses in this period */}
-            <h3 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '10px', color: '#f97316' }}>ریز مصارف این دوره ({stats.expensesCount} مورد)</h3>
-            {stats.expensesCount === 0 ? (
-              <p style={{ fontSize: '13px', color: '#64748b', fontStyle: 'italic', marginBottom: '30px' }}>هیچ مصرفی در این دوره ثبت نشده است.</p>
-            ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '30px' }}>
-                <thead>
-                  <tr style={{ backgroundColor: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                    <th style={{ padding: '8px', textAlign: 'right', fontSize: '12px' }}>#</th>
-                    <th style={{ padding: '8px', textAlign: 'right', fontSize: '12px' }}>تاریخ</th>
-                    <th style={{ padding: '8px', textAlign: 'right', fontSize: '12px' }}>نام مصرف</th>
-                    <th style={{ padding: '8px', textAlign: 'right', fontSize: '12px' }}>دسته</th>
-                    <th style={{ padding: '8px', textAlign: 'left', fontSize: '12px' }}>مبلغ اصلی</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredData.filteredExpenses.map((e, idx) => (
-                    <tr key={e.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                      <td style={{ padding: '8px', fontSize: '12px', textAlign: 'right' }}>{idx + 1}</td>
-                      <td style={{ padding: '8px', fontSize: '12px', textAlign: 'right', fontFamily: 'monospace' }}>{e.expense_date}</td>
-                      <td style={{ padding: '8px', fontSize: '12px', textAlign: 'right' }}>{e.expense_name}</td>
-                      <td style={{ padding: '8px', fontSize: '12px', textAlign: 'right' }}>{e.category || '—'}</td>
-                      <td style={{ padding: '8px', fontSize: '12px', textAlign: 'left', fontWeight: 'bold' }}>
-                        {Number(e.amount).toLocaleString()} <span style={{ fontSize: '10px', color: '#64748b' }}>{e.currency}</span>
-                      </td>
+                {/* Summary Table */}
+                <h3 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '10px', color: '#f97316' }}>خلاصه وضعیت مالی</h3>
+                <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '30px' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#fff7ed', borderTop: '1px solid #f97316', borderBottom: '1px solid #f97316' }}>
+                      <th style={{ padding: '10px', textAlign: 'right', fontSize: '13px' }}>عنوان</th>
+                      <th style={{ padding: '10px', textAlign: 'left', fontSize: '13px' }}>مبلغ (AFN)</th>
+                      <th style={{ padding: '10px', textAlign: 'left', fontSize: '13px' }}>مبلغ (USD)</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+                  </thead>
+                  <tbody>
+                    <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                      <td style={{ padding: '12px', fontSize: '13px' }}>۱. دخل کل (نقد جمع‌آوری شده)</td>
+                      <td style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: 'bold' }}>{stats.totalRevenueAfn.toLocaleString()} AFN</td>
+                      <td style={{ padding: '12px', textAlign: 'left', fontSize: '13px', fontWeight: 'bold' }}>$ {stats.totalRevenueUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                      <td style={{ padding: '12px', fontSize: '13px', color: '#2563eb' }}>۲. سود کل</td>
+                      <td style={{ padding: '12px', textAlign: 'left', fontSize: '13px', color: '#2563eb', fontWeight: 'bold' }}>{stats.profitAfn.toLocaleString()} AFN</td>
+                      <td style={{ padding: '12px', textAlign: 'left', fontSize: '13px', color: '#2563eb', fontWeight: 'bold' }}>$ {stats.profitUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                    </tr>
+                    <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                      <td style={{ padding: '12px', fontSize: '13px', color: '#dc2626' }}>۳. کل مصارف (هزینه‌ها)</td>
+                      <td style={{ padding: '12px', textAlign: 'left', fontSize: '13px', color: '#dc2626', fontWeight: 'bold' }}>{stats.totalExpensesAfn.toLocaleString()} AFN</td>
+                      <td style={{ padding: '12px', textAlign: 'left', fontSize: '13px', color: '#dc2626', fontWeight: 'bold' }}>$ {stats.totalExpensesUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                    </tr>
+                    <tr style={{ backgroundColor: '#f0fdf4', borderBottom: '1px solid #bbf7d0' }}>
+                      <td style={{ padding: '12px', fontSize: '14px', fontWeight: 'bold', color: '#166534' }}>درآمد خالص (۲ - ۳)</td>
+                      <td style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: 'bold', color: '#166534' }}>{stats.pureIncomeAfn.toLocaleString()} AFN</td>
+                      <td style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: 'bold', color: '#166534' }}>$ {stats.pureIncomeUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                    </tr>
+                  </tbody>
+                </table>
 
-            {/* Footer */}
-            <div style={{ marginTop: '50px', textAlign: 'center', borderTop: '1px dashed #cbd5e1', paddingTop: '20px' }}>
-              <p style={{ fontSize: '11px', color: '#94a3b8' }}>این گزارش به صورت خودکار توسط سیستم مدیریت فروش تولید شده است.</p>
-              <p style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>توجه: سود فروش‌های قرضی تا زمان تسویه کامل، در این گزارش محاسبه نمی‌شود.</p>
+                {/* List of Expenses in this period */}
+                <h3 style={{ fontSize: '16px', fontWeight: 'bold', marginBottom: '10px', color: '#f97316' }}>ریز مصارف این دوره ({stats.expensesCount} مورد)</h3>
+                {stats.expensesCount === 0 ? (
+                  <p style={{ fontSize: '13px', color: '#64748b', fontStyle: 'italic', marginBottom: '30px' }}>هیچ مصرفی در این دوره ثبت نشده است.</p>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '30px' }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                        <th style={{ padding: '8px', textAlign: 'right', fontSize: '12px' }}>#</th>
+                        <th style={{ padding: '8px', textAlign: 'right', fontSize: '12px' }}>تاریخ</th>
+                        <th style={{ padding: '8px', textAlign: 'right', fontSize: '12px' }}>نام مصرف</th>
+                        <th style={{ padding: '8px', textAlign: 'right', fontSize: '12px' }}>دسته</th>
+                        <th style={{ padding: '8px', textAlign: 'left', fontSize: '12px' }}>مبلغ اصلی</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredData.filteredExpenses.map((e, idx) => (
+                        <tr key={e.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                          <td style={{ padding: '8px', fontSize: '12px', textAlign: 'right' }}>{idx + 1}</td>
+                          <td style={{ padding: '8px', fontSize: '12px', textAlign: 'right', fontFamily: 'monospace' }}>{e.expense_date}</td>
+                          <td style={{ padding: '8px', fontSize: '12px', textAlign: 'right' }}>{e.expense_name}</td>
+                          <td style={{ padding: '8px', fontSize: '12px', textAlign: 'right' }}>{e.category || '—'}</td>
+                          <td style={{ padding: '8px', fontSize: '12px', textAlign: 'left', fontWeight: 'bold' }}>
+                            {Number(e.amount).toLocaleString()} <span style={{ fontSize: '10px', color: '#64748b' }}>{e.currency}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+
+                {/* Footer */}
+                <div style={{ marginTop: '50px', textAlign: 'center', borderTop: '1px dashed #cbd5e1', paddingTop: '20px' }}>
+                  <p style={{ fontSize: '11px', color: '#94a3b8' }}>این گزارش به صورت خودکار توسط سیستم مدیریت فروش تولید شده است.</p>
+                  <p style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>توجه: سود فروش‌های قرضی تا زمان تسویه کامل، در این گزارش محاسبه نمی‌شود.</p>
+                </div>
+
+              </div>
             </div>
-
-          </div>
-        </div>
+          </>
+        )}
 
       </div>
     </DashboardLayout>

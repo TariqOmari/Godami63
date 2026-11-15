@@ -16,7 +16,8 @@ import Capital from './pages/Capital'; // Import the Capital component
 import SoldBackReturned from './pages/SoldBackReturned';
 import Notification from './pages/Notification'; // Import the Notification component
 import Expenses from './pages/Expenses'; // Import the Expenses component
-import IncomesReport from './pages/IncomesReport'; // Import the IncomesReport component
+
+import IncomesReport from './pages/IncomesReport';
 export default function App() {
   return (
     <div>
