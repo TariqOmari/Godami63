@@ -13,7 +13,8 @@ import {
   PackageSearch,
   Truck,
   Bell,
-  CreditCard
+  CreditCard,
+  User
 
 
 } from 'lucide-react';
@@ -108,6 +109,10 @@ export default function Sidbar({ isOpen, toggleSidebar }) {
       badge: unseenCount,       // 👈 LIVE BADGE
     },
     { title: ' برگشتی فروشات', path: '/back-return', icon: <Wallet size={22} /> },
+    
+    { title: ' مدیریت ادمین‌ها', path: '/admins', icon: <User size={22} /> },
+
+
   ];
 
   return (
